@@ -1,0 +1,432 @@
+/**
+ * Thorbit Design Tokens
+ *
+ * Extracted from frontend-nextjs/app/globals.css for Chrome Extension use.
+ * This file contains all CSS custom properties (design tokens) that define
+ * the Thorbit visual identity.
+ *
+ * Design Philosophy: Warm, nature-inspired palette based on Pantone 2025
+ * "Mocha Mousse" color story. Emphasizes elegance through light typography
+ * and sophisticated neutral tones.
+ *
+ * CSP Compliant: No external URLs or @import statements.
+ *
+ * @version 1.0.0
+ * @source frontend-nextjs/app/globals.css
+ */
+
+:root {
+  /* ============================================
+     COLOR TOKENS - Base Palette
+     The foundation of Thorbit's warm, inviting aesthetic
+     ============================================ */
+
+  /* Base colors - Warm neutrals inspired by Pantone 2025 */
+  --background: #FDFBF7;        /* Cream white - primary background */
+  --foreground: #2C2419;        /* Rich brown-black - primary text */
+
+  /* Primary brand colors - Mocha Mousse palette (Pantone 2025)
+     Terracotta tones that convey warmth and reliability */
+  --primary: #C4704F;           /* Terracotta - main brand color, CTAs */
+  --primary-dark: #A25A3F;      /* Dark terracotta - hover states */
+  --primary-light: #D68966;     /* Light terracotta - active states, accents */
+
+  /* Accent colors - Golden Honey
+     Used for highlights, premium features, special CTAs */
+  --accent: #D9A854;            /* Gold - accent highlights */
+  --accent-hover: #C99644;      /* Dark gold - hover states */
+
+  /* Secondary - Serene Blues & Greens
+     Teal tones for info states, secondary UI elements */
+  --secondary: #7FA9B3;         /* Teal - info states, borders */
+  --secondary-dark: #6A8F99;    /* Dark teal - hover states */
+
+  /* ============================================
+     COLOR TOKENS - Semantic Status Colors
+     Warm-shifted versions of traditional semantic colors
+     ============================================ */
+
+  /* Coverage/Score level colors */
+  --high: #6B9B5A;              /* Olive sage - high scores, positive */
+  --medium: #D4A55A;            /* Warm amber - medium scores, caution */
+  --low: #C4695A;               /* Warm brick - low scores, attention needed */
+  --none: #A89B8F;              /* Neutral warm grey - no data */
+
+  /* Status/Feedback colors - For consistent UI feedback */
+  --success: #6B9B5A;           /* Same as high - positive outcomes */
+  --success-light: #EEF5EC;     /* Success background */
+  --warning: #D4A55A;           /* Same as medium - caution states */
+  --warning-light: #FDF8EC;     /* Warning background */
+  --error: #C4695A;             /* Same as low - errors/failures */
+  --error-light: #FDF0EE;       /* Error background */
+  --info: #7FA9B3;              /* Same as secondary - informational */
+  --info-light: #EEF5F7;        /* Info background */
+
+  /* Importance level colors - Warm-shifted priority indicators */
+  --critical: #B85A4A;          /* Deep warm red - critical priority */
+  --imp-high: #C97A52;          /* Warm orange - high priority */
+  --imp-medium: #D4A55A;        /* Warm amber - medium priority */
+  --imp-low: #7A8B7A;           /* Warm grey-green - low priority */
+
+  /* ============================================
+     COLOR TOKENS - Text Colors
+     Rich, warm blacks for excellent readability
+     ============================================ */
+
+  --text-primary: #2C2419;      /* Primary text - headings, body */
+  --text-secondary: #6B5F53;    /* Secondary text - labels, captions */
+  --text-tertiary: #9B8F83;     /* Tertiary text - placeholders, meta */
+
+  /* ============================================
+     COLOR TOKENS - Background Colors
+     Layered warm neutrals for depth and hierarchy
+     ============================================ */
+
+  --bg-primary: #FDFBF7;        /* Primary background - main content area */
+  --bg-secondary: #F5F1E8;      /* Secondary background - cards, panels */
+  --bg-tertiary: #EBE5DA;       /* Tertiary background - nested elements */
+  --bg-hover: #F9F5ED;          /* Hover state background */
+
+  /* ============================================
+     COLOR TOKENS - Border Colors
+     Subtle warm tones for visual separation
+     ============================================ */
+
+  --border: #E0D8CC;            /* Standard border - cards, inputs */
+  --border-light: #EDE7DC;      /* Light border - subtle dividers */
+  --border-primary: rgba(139, 109, 92, 0.15); /* Primary-tinted border */
+
+  /* ============================================
+     SHADOW TOKENS
+     Warm, soft shadows using brown undertones
+     rgba(107, 91, 71, opacity) for consistency
+     ============================================ */
+
+  --shadow-sm: 0 1px 2px 0 rgba(107, 91, 71, 0.08);   /* Subtle - buttons, inputs */
+  --shadow: 0 2px 8px 0 rgba(107, 91, 71, 0.12);      /* Default - cards */
+  --shadow-md: 0 4px 16px 0 rgba(107, 91, 71, 0.16);  /* Medium - dropdowns */
+  --shadow-lg: 0 8px 24px 0 rgba(107, 91, 71, 0.20);  /* Large - modals */
+
+  /* Enhanced card shadow for floating elements */
+  --shadow-card: 0 10px 30px rgba(139, 109, 92, 0.12);
+  --shadow-card-hover: 0 12px 35px rgba(139, 109, 92, 0.16);
+
+  /* ============================================
+     ANIMATION TOKENS
+     Timing and easing for smooth, responsive interactions
+     ============================================ */
+
+  /* Duration scale - Fast for micro-interactions, slow for emphasis */
+  --duration-fast: 150ms;       /* Quick transitions - hover, active */
+  --duration-normal: 250ms;     /* Standard transitions - most UI */
+  --duration-slow: 350ms;       /* Deliberate transitions - modals, reveals */
+
+  /* Easing functions - Ease-out for responsive, natural feel */
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);      /* Standard ease-out */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1); /* Playful bounce */
+
+  /* ============================================
+     TYPOGRAPHY TOKENS - Mobile-First Scale
+     Optimized for readability on all screen sizes
+     ============================================ */
+
+  /* Font families - GT Flexa with system fallbacks
+     Note: Actual font files must be bundled separately for extension */
+  --font-sans: 'GT Flexa', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: 'GT Flexa', sans-serif;
+
+  /* Font sizes - Mobile-optimized scale */
+  --text-xs: 0.75rem;           /* 12px - captions, meta */
+  --text-sm: 0.875rem;          /* 14px - body small */
+  --text-base: 1rem;            /* 16px - body default (min for inputs) */
+  --text-lg: 1.125rem;          /* 18px - subheadings */
+  --text-xl: 1.25rem;           /* 20px - section titles */
+  --text-2xl: 1.5rem;           /* 24px - page titles */
+  --text-3xl: 1.875rem;         /* 30px - display */
+  --text-4xl: 2.25rem;          /* 36px - hero */
+
+  /* Mobile-specific typography scale */
+  --text-mobile-xs: 0.8125rem;  /* 13px - captions */
+  --text-mobile-sm: 0.9375rem;  /* 15px - body small */
+  --text-mobile-base: 1rem;     /* 16px - body (minimum for inputs) */
+  --text-mobile-lg: 1.125rem;   /* 18px - subheadings */
+  --text-mobile-xl: 1.375rem;   /* 22px - headings */
+  --text-mobile-2xl: 1.75rem;   /* 28px - page titles */
+
+  /* Font weights - Light hierarchy for elegance
+     GT Flexa supports: 300 (Light), 400 (Regular), 500 (Medium), 700 (Bold), 900 (Black) */
+  --font-weight-light: 300;     /* Body text - elegant, readable */
+  --font-weight-normal: 400;    /* Regular text */
+  --font-weight-medium: 500;    /* Secondary headers, buttons, labels */
+  --font-weight-bold: 700;      /* Strong emphasis */
+  --font-weight-black: 900;     /* Display headings, impact */
+
+  /* Line heights - Optimized for readability */
+  --leading-tight: 1.25;        /* Headings, compact text */
+  --leading-snug: 1.375;        /* Subheadings */
+  --leading-normal: 1.5;        /* Body text default */
+  --leading-relaxed: 1.625;     /* Long-form content */
+  --leading-loose: 2;           /* Extra spacing */
+
+  /* Mobile line heights */
+  --leading-mobile-tight: 1.3;
+  --leading-mobile-normal: 1.5;
+  --leading-mobile-relaxed: 1.7;
+
+  /* Letter spacing */
+  --tracking-tight: -0.02em;    /* Display headings */
+  --tracking-normal: 0;         /* Body text */
+  --tracking-wide: 0.01em;      /* Buttons, badges */
+
+  /* ============================================
+     SPACING TOKENS
+     4px base unit system for consistent rhythm
+     ============================================ */
+
+  --space-0: 0;
+  --space-1: 0.25rem;           /* 4px - minimal spacing */
+  --space-2: 0.5rem;            /* 8px - tight spacing */
+  --space-3: 0.75rem;           /* 12px - standard gap */
+  --space-4: 1rem;              /* 16px - base unit */
+  --space-5: 1.25rem;           /* 20px */
+  --space-6: 1.5rem;            /* 24px - section spacing */
+  --space-8: 2rem;              /* 32px - generous spacing */
+  --space-10: 2.5rem;           /* 40px */
+  --space-12: 3rem;             /* 48px - large sections */
+  --space-16: 4rem;             /* 64px */
+  --space-20: 5rem;             /* 80px */
+  --space-24: 6rem;             /* 96px */
+
+  /* Touch-optimized spacing */
+  --touch-target-min: 44px;     /* Minimum touch target (WCAG) */
+  --space-mobile-gutter: 16px;  /* Mobile page margins */
+  --space-mobile-gap: 12px;     /* Mobile element gaps */
+
+  /* ============================================
+     SIZING TOKENS
+     Width constraints for responsive layouts
+     ============================================ */
+
+  --size-xs: 20rem;             /* 320px - mobile minimum */
+  --size-sm: 24rem;             /* 384px - compact panels */
+  --size-md: 28rem;             /* 448px - medium panels */
+  --size-lg: 32rem;             /* 512px - modals, dialogs */
+  --size-xl: 36rem;             /* 576px */
+  --size-2xl: 42rem;            /* 672px */
+  --size-3xl: 48rem;            /* 768px - tablet breakpoint */
+  --size-4xl: 56rem;            /* 896px */
+  --size-5xl: 64rem;            /* 1024px - desktop content */
+  --size-6xl: 72rem;            /* 1152px */
+  --size-7xl: 80rem;            /* 1280px - max content width */
+  --size-full: 100%;
+
+  /* ============================================
+     BORDER RADIUS TOKENS
+     Rounded corners for modern, friendly UI
+     ============================================ */
+
+  --radius-none: 0;
+  --radius-sm: 0.25rem;         /* 4px - small elements, badges */
+  --radius-md: 0.5rem;          /* 8px - buttons, inputs */
+  --radius-lg: 0.75rem;         /* 12px - cards */
+  --radius-xl: 1rem;            /* 16px - large cards, panels */
+  --radius-2xl: 1.5rem;         /* 24px - modals, bottom sheets */
+  --radius-full: 9999px;        /* Pills, avatars, circles */
+
+  /* ============================================
+     Z-INDEX TOKENS
+     Layering system for overlays and modals
+     ============================================ */
+
+  --z-base: 0;                  /* Normal flow */
+  --z-dropdown: 10;             /* Dropdowns, tooltips */
+  --z-sticky: 20;               /* Sticky headers */
+  --z-fixed: 30;                /* Fixed position elements */
+  --z-modal-backdrop: 40;       /* Modal overlay background */
+  --z-modal: 50;                /* Modal content */
+  --z-popover: 60;              /* Popovers over modals */
+  --z-tooltip: 70;              /* Tooltips (highest) */
+
+  /* Chrome extension specific z-index
+     Sidepanel operates in its own stacking context */
+  --z-extension-panel: 2147483647;  /* Maximum for content script overlays */
+}
+
+/* ============================================
+   DARK MODE TOKENS (Chrome Extension Specific)
+   Dark theme for sidepanel and overlay contexts
+   ============================================ */
+
+:root.dark,
+[data-theme="dark"] {
+  /* Dark mode background palette */
+  --background: #111827;        /* gray-900 */
+  --foreground: #F9FAFB;        /* gray-50 */
+
+  /* Dark mode backgrounds */
+  --bg-primary: #111827;        /* gray-900 */
+  --bg-secondary: #1F2937;      /* gray-800 */
+  --bg-tertiary: #374151;       /* gray-700 */
+  --bg-hover: #1F2937;          /* gray-800 */
+
+  /* Dark mode text colors */
+  --text-primary: #F9FAFB;      /* gray-50 */
+  --text-secondary: #D1D5DB;    /* gray-300 */
+  --text-tertiary: #9CA3AF;     /* gray-400 */
+
+  /* Dark mode borders */
+  --border: #374151;            /* gray-700 */
+  --border-light: #4B5563;      /* gray-600 */
+
+  /* Dark mode shadows - deeper, less visible */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px 0 rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px 0 rgba(0, 0, 0, 0.6);
+
+  /* Primary colors remain consistent for brand recognition */
+  /* --primary, --accent, --secondary unchanged */
+}
+
+/* ============================================
+   UTILITY CLASSES
+   Common patterns as reusable classes
+   ============================================ */
+
+/* Touch target utilities - WCAG compliant touch areas */
+.touch-target {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+}
+
+.touch-target-sm {
+  min-height: 36px;
+  min-width: 36px;
+}
+
+.touch-target-lg {
+  min-height: 52px;
+  min-width: 52px;
+}
+
+/* Touch feedback - subtle press indication */
+.touch-feedback {
+  transition: transform 100ms ease-out, opacity 100ms ease-out;
+}
+
+.touch-feedback:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
+/* Focus states - Visible focus for accessibility */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================
+   ANIMATION KEYFRAMES
+   Reusable animations for consistent motion
+   ============================================ */
+
+/* Slide up - Bottom sheets, modals */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Slide down - Dropdowns, notifications */
+@keyframes slide-down {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Fade in - General appearance */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Scale in - Modals, popovers */
+@keyframes scale-in {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Shimmer - Loading skeletons */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+/* Brain pulse - AI thinking indicator */
+@keyframes brain-pulse {
+  0%, 100% {
+    transform: scale(1);
+    color: currentColor;
+  }
+  50% {
+    transform: scale(1.11);
+    color: var(--primary);
+  }
+}
+
+/* Animation utility classes */
+.animate-slide-up {
+  animation: slide-up 0.3s var(--ease-out) forwards;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.2s var(--ease-out) forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s var(--ease-out) forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s var(--ease-out) forwards;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary) 0%,
+    var(--bg-tertiary) 50%,
+    var(--bg-secondary) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+.animate-brain-pulse {
+  animation: brain-pulse 4s ease-in-out infinite;
+}

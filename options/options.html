@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Assistant Settings</title>
+  <link rel="stylesheet" href="../styles/tokens.css">
+  <link rel="stylesheet" href="../styles/fonts.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <div class="header-content">
+        <h1>AI Assistant Settings</h1>
+        <span class="version-badge">v1.0</span>
+      </div>
+    </header>
+
+    <main class="options-content">
+      <!-- Provider Settings Section -->
+      <section class="settings-section">
+        <h2>AI Provider</h2>
+
+        <div class="setting-group">
+          <label for="provider-select">Active Provider</label>
+          <select id="provider-select">
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="custom">Custom Endpoint</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <label for="anthropic-key">Anthropic API Key</label>
+          <div class="api-key-input">
+            <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+            <button type="button" class="toggle-visibility" data-target="anthropic-key" aria-label="Toggle API key visibility">
+              <svg class="icon-show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="icon-hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+          <span class="field-hint">Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic Console</a></span>
+        </div>
+
+        <div class="setting-group">
+          <label for="openrouter-key">OpenRouter API Key</label>
+          <div class="api-key-input">
+            <input type="password" id="openrouter-key" placeholder="sk-or-...">
+            <button type="button" class="toggle-visibility" data-target="openrouter-key" aria-label="Toggle API key visibility">
+              <svg class="icon-show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="icon-hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+          <span class="field-hint">Get your API key from <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">OpenRouter</a></span>
+        </div>
+
+        <div class="setting-group" id="custom-endpoint-group">
+          <label for="custom-endpoint">Custom Endpoint URL</label>
+          <input type="url" id="custom-endpoint" placeholder="https://api.example.com/v1/chat">
+          <span class="field-hint">OpenAI-compatible API endpoint</span>
+        </div>
+
+        <div class="setting-group" id="custom-key-group">
+          <label for="custom-key">Custom API Key</label>
+          <div class="api-key-input">
+            <input type="password" id="custom-key" placeholder="Your API key">
+            <button type="button" class="toggle-visibility" data-target="custom-key" aria-label="Toggle API key visibility">
+              <svg class="icon-show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="icon-hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-group">
+          <label for="model-select">Model</label>
+          <select id="model-select">
+            <optgroup label="Anthropic">
+              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recommended)</option>
+              <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+              <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+              <option value="claude-3-haiku-20240307">Claude 3 Haiku (Fast)</option>
+            </optgroup>
+            <optgroup label="OpenRouter" id="openrouter-models">
+              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (OpenRouter)</option>
+              <option value="openai/gpt-4-turbo">GPT-4 Turbo</option>
+              <option value="google/gemini-pro">Gemini Pro</option>
+            </optgroup>
+          </select>
+        </div>
+      </section>
+
+      <!-- System Prompt Section -->
+      <section class="settings-section">
+        <h2>System Prompt</h2>
+
+        <div class="setting-group">
+          <label for="system-prompt">Custom Instructions</label>
+          <textarea id="system-prompt" rows="6" placeholder="Add custom instructions for the AI assistant...
+
+Example: You are an expert web developer. When reviewing code, focus on performance and accessibility."></textarea>
+          <div class="textarea-footer">
+            <span class="char-counter">
+              <span id="prompt-chars">0</span> / 10,000
+            </span>
+            <span class="char-warning" id="prompt-warning">Approaching limit</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Site Rules Section -->
+      <section class="settings-section">
+        <h2>Site Rules</h2>
+        <p class="section-description">Control which sites the extension can access. Uses Chrome match patterns.</p>
+
+        <div class="setting-group">
+          <label>Allowed Sites</label>
+          <div id="allowed-sites-list" class="site-list" role="list" aria-label="Allowed sites"></div>
+          <div class="add-site">
+            <input type="text" id="add-allowed-site" placeholder="*://*.example.com/*" aria-label="Add allowed site pattern">
+            <button type="button" id="add-allowed-btn" class="btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Add
+            </button>
+          </div>
+          <span class="field-hint">Pattern format: scheme://host/path (e.g., *://*.github.com/*)</span>
+        </div>
+
+        <div class="setting-group">
+          <label>Blocked Sites</label>
+          <div id="blocked-sites-list" class="site-list" role="list" aria-label="Blocked sites"></div>
+          <div class="add-site">
+            <input type="text" id="add-blocked-site" placeholder="*://*.example.com/*" aria-label="Add blocked site pattern">
+            <button type="button" id="add-blocked-btn" class="btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              Add
+            </button>
+          </div>
+          <span class="field-hint">Blocked sites take precedence over allowed sites</span>
+        </div>
+      </section>
+
+      <!-- Behavior Section -->
+      <section class="settings-section">
+        <h2>Behavior</h2>
+
+        <div class="setting-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="auto-analyze">
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Auto-analyze on page load</span>
+              <span class="checkbox-description">Automatically analyze page content when navigating to a new page</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="setting-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="stream-responses" checked>
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Stream responses</span>
+              <span class="checkbox-description">Show AI responses as they are generated</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="setting-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="save-history" checked>
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Save conversation history</span>
+              <span class="checkbox-description">Keep chat history across browser sessions</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="setting-group">
+          <label for="max-history">Maximum history length</label>
+          <div class="range-input">
+            <input type="range" id="max-history" min="10" max="200" step="10" value="50">
+            <span class="range-value" id="max-history-value">50</span>
+          </div>
+          <span class="field-hint">Number of conversations to keep in history</span>
+        </div>
+      </section>
+
+      <!-- DOM Extraction Section -->
+      <section class="settings-section">
+        <h2>DOM Extraction</h2>
+        <p class="section-description">Configure how page content is extracted for AI analysis.</p>
+
+        <div class="setting-group">
+          <label for="max-tokens">Maximum tokens</label>
+          <div class="range-input">
+            <input type="range" id="max-tokens" min="10000" max="200000" step="10000" value="100000">
+            <span class="range-value" id="max-tokens-value">100,000</span>
+          </div>
+          <span class="field-hint">Higher values provide more context but increase API costs</span>
+        </div>
+
+        <div class="setting-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="include-hidden">
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Include hidden elements</span>
+              <span class="checkbox-description">Extract content from elements with display:none or visibility:hidden</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="setting-group">
+          <label for="pruning-level">Content pruning level</label>
+          <select id="pruning-level">
+            <option value="minimal">Minimal - Keep most content</option>
+            <option value="balanced" selected>Balanced - Smart filtering</option>
+            <option value="aggressive">Aggressive - Maximum reduction</option>
+          </select>
+          <span class="field-hint">How aggressively to remove irrelevant content</span>
+        </div>
+      </section>
+
+      <!-- Appearance Section -->
+      <section class="settings-section">
+        <h2>Appearance</h2>
+
+        <div class="setting-group">
+          <label for="theme-select">Theme</label>
+          <select id="theme-select">
+            <option value="system">System Default</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+
+        <div class="setting-group">
+          <label for="font-size">Font Size</label>
+          <select id="font-size">
+            <option value="small">Small</option>
+            <option value="medium" selected>Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </div>
+
+        <div class="setting-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="compact-mode">
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Compact mode</span>
+              <span class="checkbox-description">Reduce padding and spacing for more content</span>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Backup & Restore Section -->
+      <section class="settings-section">
+        <h2>Backup & Restore</h2>
+
+        <div class="button-group">
+          <button type="button" id="export-btn" class="btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export Settings
+          </button>
+
+          <button type="button" id="import-btn" class="btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Import Settings
+          </button>
+
+          <button type="button" id="reset-btn" class="btn-danger">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+              <path d="M3 21v-5h5"/>
+            </svg>
+            Reset to Defaults
+          </button>
+        </div>
+
+        <input type="file" id="import-file" accept=".json" hidden>
+
+        <div class="checkbox-group" style="margin-top: var(--space-4);">
+          <label class="checkbox-label">
+            <input type="checkbox" id="export-include-keys">
+            <span class="checkbox-custom"></span>
+            <span class="checkbox-text">
+              <span class="checkbox-title">Include API keys in export</span>
+              <span class="checkbox-description">Warning: API keys will be visible in the exported file</span>
+            </span>
+          </label>
+        </div>
+      </section>
+    </main>
+
+    <footer class="options-footer">
+      <div class="footer-content">
+        <span class="save-status" id="save-status">
+          <svg class="status-icon status-saved" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <svg class="status-icon status-saving" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <svg class="status-icon status-error" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="15" y1="9" x2="9" y2="15"/>
+            <line x1="9" y1="9" x2="15" y2="15"/>
+          </svg>
+          <span class="status-text">All changes saved</span>
+        </span>
+        <a href="https://thorbit.com" target="_blank" rel="noopener noreferrer" class="footer-link">Thorbit</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="confirm-modal" class="modal" role="dialog" aria-labelledby="modal-title" aria-hidden="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <h3 id="modal-title">Confirm Action</h3>
+      <p id="modal-message">Are you sure you want to proceed?</p>
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="modal-confirm" class="btn-danger">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast" role="alert" aria-live="polite" aria-hidden="true">
+    <svg class="toast-icon toast-success" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+    <svg class="toast-icon toast-error" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="15" y1="9" x2="9" y2="15"/>
+      <line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+    <span class="toast-message"></span>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

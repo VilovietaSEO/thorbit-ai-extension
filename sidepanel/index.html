@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Page Assistant</title>
+  <!-- Thorbit Design System -->
+  <link rel="stylesheet" href="../styles/tokens.css">
+  <link rel="stylesheet" href="../styles/fonts.css">
+  <!-- Component Styles -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="root"></div>
+
+  <!--
+    Note: For Chrome extensions with CSP 'script-src self', we cannot use CDN React.
+    In production, bundle React with a build tool (webpack/vite/esbuild).
+    For development, we use a simple vanilla JS approach that mimics React patterns.
+  -->
+  <script type="module" src="index.js"></script>
+</body>
+</html>

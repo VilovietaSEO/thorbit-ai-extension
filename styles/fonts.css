@@ -1,0 +1,90 @@
+/**
+ * GT Flexa Font Family - Chrome Extension Bundle
+ *
+ * CSP Compliant: All fonts are locally bundled (no CDN dependencies)
+ * Total bundle size: ~66KB (well under 500KB limit)
+ *
+ * Available weights:
+ * - 300: Light (body text, elegant typography)
+ * - 300 italic: Light Italic (emphasis)
+ * - 400: Regular (standard body text)
+ * - 500: Medium (secondary headers, buttons, labels)
+ * - 700: Bold (emphasis, important text)
+ * - 900: Black (main headers, display text)
+ *
+ * Usage in Chrome Extension:
+ * - For content scripts: Use chrome.runtime.getURL() to resolve paths
+ * - For sidepanel/popup: Relative paths work directly
+ */
+
+/* GT Flexa Light (300) - Primary body text weight */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Light-Trial.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* GT Flexa Light Italic (300 italic) - Emphasis */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Light-Italic-Trial.woff2') format('woff2');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* GT Flexa Regular (400) - Standard body text */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Regular-Trial.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* GT Flexa Medium (500) - Secondary headers, buttons */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Medium-Trial.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* GT Flexa Bold (700) - Emphasis, important text */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Bold-Trial.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* GT Flexa Black (900) - Main headers, display text */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Black-Trial.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/**
+ * Note: Semi-Bold (600) is not available in the GT Flexa Trial package.
+ * When font-weight: 600 is requested, browsers will use the closest available
+ * weight (Medium 500 or Bold 700) based on font-weight resolution rules.
+ *
+ * For explicit Semi-Bold needs, use font-weight: 700 (Bold) as a substitute,
+ * or map 600 to Medium (500) for a lighter alternative:
+ */
+
+/* Optional: Alias 600 to Bold (700) for compatibility */
+@font-face {
+  font-family: 'GT Flexa';
+  src: url('../fonts/GT-Flexa-Bold-Trial.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
