@@ -647,6 +647,36 @@
   let lastExtraction = null;
 
   /**
+   * Wait for DOM to be ready (document.body exists)
+   * @returns {Promise<boolean>} True when DOM is ready
+   */
+  function waitForDomReady(timeout = 5000) {
+    return new Promise((resolve) => {
+      if (document.body) {
+        resolve(true);
+        return;
+      }
+
+      const startTime = Date.now();
+      const checkBody = () => {
+        if (document.body) {
+          resolve(true);
+        } else if (Date.now() - startTime > timeout) {
+          resolve(false);
+        } else {
+          requestAnimationFrame(checkBody);
+        }
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => resolve(true), { once: true });
+      } else {
+        checkBody();
+      }
+    });
+  }
+
+  /**
    * Message listener for communication with service worker
    */
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -663,27 +693,39 @@
         return true;
       }
 
-      try {
-        const threshold = message.viewportThreshold || DEFAULT_VIEWPORT_THRESHOLD;
-        lastExtraction = extractPrunedDom(threshold);
+      // Wait for DOM to be ready before extracting (async)
+      waitForDomReady().then((ready) => {
+        if (!ready) {
+          sendResponse({
+            success: false,
+            error: 'DOM not ready - page may still be loading',
+          });
+          return;
+        }
 
-        // Include site context in response
-        sendResponse({
-          success: true,
-          data: lastExtraction,
-          siteContext: {
-            hostname: window.location.hostname,
-            siteSettings: siteSettings,
-            hasCustomSettings: siteSettings !== null,
-          },
-        });
-      } catch (error) {
-        console.error('DOM extraction error:', error);
-        sendResponse({
-          success: false,
-          error: error.message,
-        });
-      }
+        try {
+          const threshold = message.viewportThreshold || DEFAULT_VIEWPORT_THRESHOLD;
+          lastExtraction = extractPrunedDom(threshold);
+
+          // Include site context in response
+          sendResponse({
+            success: true,
+            data: lastExtraction,
+            siteContext: {
+              hostname: window.location.hostname,
+              siteSettings: siteSettings,
+              hasCustomSettings: siteSettings !== null,
+            },
+          });
+        } catch (error) {
+          console.error('DOM extraction error:', error);
+          sendResponse({
+            success: false,
+            error: error.message,
+          });
+        }
+      });
+
       return true; // Keep channel open for async response
     }
 

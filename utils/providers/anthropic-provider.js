@@ -28,7 +28,11 @@ import {
  * Error thrown when Anthropic API is overloaded (529)
  */
 class OverloadedError extends ProviderError {
-  constructor(message, retryAfter = null) {
+  /**
+   * @param {string} message - Error message
+   * @param {number} [retryAfter] - Seconds until retry allowed
+   */
+  constructor(message, retryAfter = undefined) {
     super(message, 'anthropic', 529, true, { retryAfter });
     this.name = 'OverloadedError';
     this.retryAfter = retryAfter;
@@ -64,6 +68,7 @@ class AnthropicProvider extends AIProvider {
    * @param {string} [config.defaultModel] - Default model (default: claude-sonnet-4-5-20250929)
    * @param {string} [config.anthropicVersion] - API version (default: 2023-06-01)
    * @param {boolean} [config.enableCaching] - Enable prompt caching (default: true)
+   * @param {string} [config.keyStorageKey] - Storage key for API key (default: anthropicApiKey)
    */
   constructor(config = {}) {
     super({
@@ -142,12 +147,23 @@ class AnthropicProvider extends AIProvider {
     const headers = {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': this.anthropicVersion
+      'anthropic-version': this.anthropicVersion,
+      'anthropic-dangerous-direct-browser-access': 'true'
     };
 
-    // Enable prompt caching beta if enabled
+    // Build beta features list
+    const betaFeatures = [];
+
     if (this.enableCaching) {
-      headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
+      betaFeatures.push('prompt-caching-2024-07-31');
+    }
+
+    // Always enable extended thinking and advanced tool use
+    betaFeatures.push('interleaved-thinking-2025-05-14');
+    betaFeatures.push('advanced-tool-use-2025-11-20');
+
+    if (betaFeatures.length > 0) {
+      headers['anthropic-beta'] = betaFeatures.join(',');
     }
 
     return headers;
@@ -166,7 +182,7 @@ class AnthropicProvider extends AIProvider {
   buildRequestPayload(messages, options = {}) {
     const payload = {
       model: options.model || this.defaultModel,
-      max_tokens: options.maxTokens || 4096,
+      max_tokens: options.maxTokens || 6000,
       messages: this.formatMessages(messages)
     };
 
@@ -175,9 +191,22 @@ class AnthropicProvider extends AIProvider {
       payload.system = this.formatSystemPrompt(options.systemPrompt);
     }
 
-    // Add temperature if specified (default is 1.0)
-    if (typeof options.temperature === 'number') {
-      payload.temperature = options.temperature;
+    // Extended thinking mode (default: enabled with 10K budget)
+    // Note: Thinking requires temperature = 1.0
+    const enableThinking = options.enableThinking !== false;
+
+    if (enableThinking) {
+      payload.thinking = {
+        type: 'enabled',
+        budget_tokens: options.thinkingBudget || 10000
+      };
+      // Force temperature to 1.0 when thinking is enabled
+      payload.temperature = 1.0;
+    } else {
+      // Add temperature if specified (only when thinking is disabled)
+      if (typeof options.temperature === 'number') {
+        payload.temperature = options.temperature;
+      }
     }
 
     // Add top_p if specified
@@ -356,11 +385,13 @@ class AnthropicProvider extends AIProvider {
         });
       }
 
-      // Extract text content from response
+      // Extract text and thinking content from response
       const content = this.extractTextContent(data.content);
+      const thinking = this.extractThinkingContent(data.content);
 
       return {
         content,
+        thinking,
         model: data.model,
         stopReason: data.stop_reason,
         usage: {
@@ -440,6 +471,11 @@ class AnthropicProvider extends AIProvider {
     }
 
     // Process SSE stream
+    if (!response.body) {
+      yield { type: 'error', error: 'Response body is null - streaming not supported', statusCode: 500 };
+      return;
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -605,6 +641,22 @@ class AnthropicProvider extends AIProvider {
       .join('');
   }
 
+  /**
+   * Extract thinking content from response content blocks
+   * @param {Array} contentBlocks - Content blocks from API response
+   * @returns {string} Thinking content
+   */
+  extractThinkingContent(contentBlocks) {
+    if (!contentBlocks || !Array.isArray(contentBlocks)) {
+      return '';
+    }
+
+    return contentBlocks
+      .filter(block => block.type === 'thinking')
+      .map(block => block.thinking)
+      .join('');
+  }
+
   // ---------------------------------------------------------------------------
   // Error Handling
   // ---------------------------------------------------------------------------
@@ -629,7 +681,7 @@ class AnthropicProvider extends AIProvider {
       return new RateLimitError(
         message,
         'anthropic',
-        retryAfter ? parseInt(retryAfter, 10) : null
+        retryAfter ? parseInt(retryAfter, 10) : undefined
       );
     }
 
@@ -638,7 +690,7 @@ class AnthropicProvider extends AIProvider {
       const retryAfter = response.headers.get('retry-after');
       return new OverloadedError(
         message || 'Anthropic API is overloaded',
-        retryAfter ? parseInt(retryAfter, 10) : null
+        retryAfter ? parseInt(retryAfter, 10) : undefined
       );
     }
 
@@ -653,7 +705,7 @@ class AnthropicProvider extends AIProvider {
     }
 
     // Default error
-    const retryable = this.shouldRetry(response.status, null);
+    const retryable = this.shouldRetry(response.status, undefined);
     return new ProviderError(message, 'anthropic', response.status, retryable, errorData);
   }
 
@@ -661,7 +713,7 @@ class AnthropicProvider extends AIProvider {
    * Determine if an error should trigger a retry
    * Extends base class to handle Anthropic-specific status codes
    * @param {number} statusCode - HTTP status code
-   * @param {Error} error - Error object
+   * @param {Error} [error] - Error object
    * @returns {boolean} Whether to retry
    */
   shouldRetry(statusCode, error) {
@@ -696,7 +748,7 @@ class AnthropicProvider extends AIProvider {
     }
 
     const apiKey = await this.getApiKey();
-    if (!this.validateApiKeyFormat(apiKey)) {
+    if (!apiKey || !this.validateApiKeyFormat(apiKey)) {
       return {
         ready: false,
         error: 'Invalid Anthropic API key format (must start with sk-ant-)'

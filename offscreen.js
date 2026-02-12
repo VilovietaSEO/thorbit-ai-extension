@@ -23,10 +23,137 @@
  * - Fallback: Backend proxy when no API keys configured
  */
 
-import { ProviderManager } from './utils/providers/provider-manager.js';
-import { AnthropicProvider } from './utils/providers/anthropic-provider.js';
-import { OpenRouterProvider } from './utils/providers/openrouter-provider.js';
-import { AgentPromptAssembler } from './prompts/agent-assembler.js';
+// Immediately log to verify script is loading
+console.log('[Offscreen] Script file loaded at', new Date().toISOString());
+
+// Track initialization state
+let initializationError = null;
+let providersReady = false;
+let initializationStep = 'not_started';
+let initializationLogs = [];
+
+// Declare module variables (will be assigned after dynamic import)
+let ProviderManager = null;
+let AnthropicProvider = null;
+let OpenRouterProvider = null;
+let AgentPromptAssembler = null;
+let providerManager = null;
+let agentPromptAssembler = null;
+
+// Helper to track initialization progress
+function logProgress(step, message) {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] ${step}: ${message}`;
+  console.log('[Offscreen]', logEntry);
+  initializationLogs.push(logEntry);
+  initializationStep = step;
+}
+
+// Load modules dynamically with error handling
+async function loadModules() {
+  try {
+    logProgress('load_modules_start', 'Starting module imports');
+
+    const [pmModule, apModule, orModule, aaModule] = await Promise.all([
+      import('./utils/providers/provider-manager.js'),
+      import('./utils/providers/anthropic-provider.js'),
+      import('./utils/providers/openrouter-provider.js'),
+      import('./prompts/agent-assembler.js')
+    ]);
+
+    logProgress('modules_imported', 'Extracting classes from modules');
+
+    ProviderManager = pmModule.ProviderManager;
+    AnthropicProvider = apModule.AnthropicProvider;
+    OpenRouterProvider = orModule.OpenRouterProvider;
+    AgentPromptAssembler = aaModule.AgentPromptAssembler;
+
+    logProgress('creating_instances', 'Creating provider manager instances');
+
+    // Create instances
+    providerManager = new ProviderManager();
+    agentPromptAssembler = new AgentPromptAssembler();
+
+    logProgress('load_modules_complete', 'All modules loaded successfully');
+    return true;
+  } catch (error) {
+    const errorMsg = `${error.name}: ${error.message}`;
+    logProgress('load_modules_error', errorMsg);
+    console.error('[Offscreen] MODULE LOAD ERROR:', error);
+    console.error('[Offscreen] Error stack:', error.stack);
+    initializationError = `Module load failed: ${error.message}`;
+    return false;
+  }
+}
+
+console.log('[Offscreen] Module loader defined');
+
+// =============================================================================
+// Early Message Handler Registration (works even if modules fail to load)
+// =============================================================================
+
+// Register message listener immediately so PING always works
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Only handle messages targeted at offscreen document
+  if (message.target !== 'offscreen') {
+    return false;
+  }
+
+  console.log('[Offscreen] Received message:', message.action, 'providersReady:', providersReady);
+
+  // Handle PING immediately even if providers aren't ready
+  if (message.action === 'PING') {
+    sendResponse({
+      status: 'alive',
+      timestamp: Date.now(),
+      document: 'offscreen',
+      providersReady: providersReady,
+      initializationError: initializationError,
+      initializationStep: initializationStep,
+      initializationLogs: initializationLogs.slice(-10), // Last 10 log entries
+      activeProvider: providerManager?.getActiveProviderName() || null,
+      availableProviders: providerManager?.getProviderNames() || [],
+      hasProviderManager: !!providerManager,
+      hasAgentAssembler: !!agentPromptAssembler
+    });
+    return true;
+  }
+
+  // For other messages, check if providers are ready
+  if (!providersReady) {
+    sendResponse({
+      error: initializationError || 'Providers not yet initialized. Please wait.',
+      providersReady: false
+    });
+    return true;
+  }
+
+  // Route to full message handler
+  handleMessage(message)
+    .then(result => {
+      console.log('[Offscreen] Sending response for:', message.action);
+      sendResponse(result);
+    })
+    .catch(error => {
+      console.error('[Offscreen] Error handling message:', error);
+      sendResponse({
+        error: error.message,
+        action: message.action
+      });
+    });
+
+  return true;
+});
+
+console.log('[Offscreen] Early message listener registered');
+
+// Test if script continues executing
+try {
+  initializationLogs.push('[CHECKPOINT 1] After message listener registration');
+  console.log('[Offscreen] Checkpoint 1 passed');
+} catch (e) {
+  console.error('[Offscreen] Checkpoint 1 failed:', e);
+}
 
 // =============================================================================
 // Configuration
@@ -35,7 +162,7 @@ import { AgentPromptAssembler } from './prompts/agent-assembler.js';
 const CONFIG = {
   // Default model configuration
   model: 'claude-sonnet-4-20250514',
-  maxTokens: 4096,
+  maxTokens: 6000,
 
   // Backend proxy configuration (fallback when no API keys)
   useBackendProxy: false,
@@ -43,12 +170,14 @@ const CONFIG = {
   backendProxyEndpoint: 'https://api.anthropic.com/v1/messages'
 };
 
+initializationLogs.push('[CHECKPOINT] After CONFIG');
+
 // =============================================================================
-// Provider Manager Instance
+// Provider Manager Instance (created after modules load)
 // =============================================================================
 
-const providerManager = new ProviderManager();
-const agentPromptAssembler = new AgentPromptAssembler();
+// providerManager and agentPromptAssembler are created in loadModules()
+// and assigned to the let variables declared at the top
 
 /**
  * Initialize providers from stored API keys
@@ -58,55 +187,75 @@ async function initializeProviders() {
   console.log('[Offscreen] Initializing providers...');
 
   try {
-    // Load API keys from storage
-    const localData = await chrome.storage.local.get([
-      'anthropicApiKey',
-      'openrouter_api_key'
-    ]);
+    // Offscreen documents only have chrome.runtime access, not chrome.storage
+    // Get settings from service worker via message passing
+    const settingsResponse = await chrome.runtime.sendMessage({
+      type: 'GET_SETTINGS'
+    });
 
-    const syncData = await chrome.storage.sync.get([
-      'provider',
-      'apiKeys'
-    ]);
+    if (!settingsResponse || settingsResponse.error) {
+      console.warn('[Offscreen] Failed to get settings from service worker:', settingsResponse?.error);
+      return {
+        success: false,
+        error: 'Failed to load settings from service worker'
+      };
+    }
 
-    // Merge storage sources (sync takes precedence for apiKeys)
+    const settings = settingsResponse.settings || {};
+
+    // Get API keys from settings
     const apiKeys = {
-      anthropic: syncData.apiKeys?.anthropic || localData.anthropicApiKey || null,
-      openrouter: syncData.apiKeys?.openrouter || localData.openrouter_api_key || null
+      anthropic: settings.apiKeys?.anthropic || null,
+      openrouter: settings.apiKeys?.openrouter || null
     };
+
+    // Get the active provider and model from settings
+    const activeProvider = settings.provider || 'anthropic';
+    const activeModel = settings.model || settings.models?.[activeProvider] || 'claude-sonnet-4-5-20250929';
+
+    console.log('[Offscreen] Settings loaded:', {
+      hasAnthropicKey: !!apiKeys.anthropic,
+      anthropicKeyLength: apiKeys.anthropic?.length || 0,
+      hasOpenRouterKey: !!apiKeys.openrouter,
+      activeProvider,
+      activeModel,
+      rawSettings: JSON.stringify(settings).substring(0, 200)
+    });
+
+    // Get model for each provider from settings
+    const anthropicModel = settings.models?.anthropic || 'claude-sonnet-4-5-20250929';
+    const openrouterModel = settings.models?.openrouter || 'mistralai/mistral-large-2411';
 
     // Register Anthropic provider if API key exists
     if (apiKeys.anthropic) {
       const anthropicProvider = new AnthropicProvider({
         apiKey: apiKeys.anthropic,
-        defaultModel: CONFIG.model,
+        defaultModel: anthropicModel,
         enableCaching: true
       });
 
       providerManager.registerProvider('anthropic', anthropicProvider);
-      console.log('[Offscreen] Anthropic provider registered');
+      console.log('[Offscreen] Anthropic provider registered with model:', anthropicModel);
     }
 
     // Register OpenRouter provider if API key exists
     if (apiKeys.openrouter) {
       const openRouterProvider = new OpenRouterProvider({
         apiKey: apiKeys.openrouter,
-        defaultModel: 'anthropic/claude-sonnet-4.5',
+        defaultModel: openrouterModel,
         referer: 'https://thorbit.com',
         appName: 'Thorbit AI Assistant'
       });
 
       providerManager.registerProvider('openrouter', openRouterProvider);
-      console.log('[Offscreen] OpenRouter provider registered');
+      console.log('[Offscreen] OpenRouter provider registered with model:', openrouterModel);
     }
 
     // Set active provider from settings
-    const preferredProvider = syncData.provider || 'anthropic';
-
-    if (providerManager.hasProvider(preferredProvider)) {
-      const result = await providerManager.setActiveProvider(preferredProvider);
+    if (providerManager.hasProvider(activeProvider)) {
+      const result = await providerManager.setActiveProvider(activeProvider);
       if (result.success) {
-        console.log(`[Offscreen] Active provider set to: ${preferredProvider}`);
+        console.log(`[Offscreen] Active provider set to: ${activeProvider}`);
       } else {
         console.warn(`[Offscreen] Failed to set active provider: ${result.error}`);
         // Try to recover with any available provider
@@ -118,8 +267,8 @@ async function initializeProviders() {
     }
 
     // Log provider status
-    const activeProvider = providerManager.getActiveProviderName();
-    console.log(`[Offscreen] Initialization complete. Active provider: ${activeProvider || 'none'}`);
+    const finalActiveProvider = providerManager.getActiveProviderName();
+    console.log(`[Offscreen] Initialization complete. Active provider: ${finalActiveProvider || 'none'}`);
 
     return {
       success: true,
@@ -139,21 +288,25 @@ async function initializeProviders() {
 /**
  * Listen for storage changes to update providers dynamically
  */
-chrome.storage.onChanged.addListener(async (changes, areaName) => {
-  const relevantKeys = [
-    'anthropicApiKey',
-    'openrouter_api_key',
-    'provider',
-    'apiKeys'
-  ];
+// TEMPORARILY COMMENTED OUT TO DEBUG
+// chrome.storage.onChanged.addListener(async (changes, areaName) => {
+//   const relevantKeys = [
+//     'settings',  // Primary settings key from settings-manager.js
+//     'anthropicApiKey',  // Legacy
+//     'openrouter_api_key',  // Legacy
+//     'provider',  // Legacy
+//     'apiKeys'  // Legacy
+//   ];
 
-  const hasRelevantChange = relevantKeys.some(key => key in changes);
+//   const hasRelevantChange = relevantKeys.some(key => key in changes);
 
-  if (hasRelevantChange) {
-    console.log('[Offscreen] Settings changed, reinitializing providers...');
-    await initializeProviders();
-  }
-});
+//   if (hasRelevantChange) {
+//     console.log('[Offscreen] Settings changed, reinitializing providers...');
+//     await initializeProviders();
+//   }
+// });
+
+initializationLogs.push('[CHECKPOINT] After storage listener (commented out)');
 
 // =============================================================================
 // Backend Proxy Fallback
@@ -184,29 +337,58 @@ function shouldUseBackendProxy() {
  * System prompt for DOM analysis - marked for caching
  * This prompt is reused across requests, so caching provides 90% cost reduction
  */
-const SYSTEM_PROMPT_TEXT = `You are an AI assistant that analyzes web pages. You help users understand page content, find information, and interact with web elements.
+/**
+ * Chat System Prompt - Conversational AI with browser tools
+ */
+const CHAT_SYSTEM_PROMPT = `You are a helpful AI assistant in a browser extension. You can chat naturally AND control the browser when needed.
 
-When analyzing a page, you receive a pruned DOM representation that includes:
-- Page title and URL
-- Interactive elements (buttons, links, inputs) with unique labels like [0], [1], etc.
-- Visible text content from the viewport area
-- Hidden element indicators (elements not currently visible)
+## When to use browser actions
+- User asks you to navigate somewhere: use navigate action
+- User asks you to click, type, or interact: use those actions
+- User just wants to chat or ask questions: just respond normally
 
-Your capabilities:
-1. Summarize page content and purpose
-2. Find specific information requested by the user
-3. Identify interactive elements and their purposes
-4. Suggest actions the user might want to take
-5. Answer questions about the page structure and content
+## Available Actions
+When you need to control the browser, add an actions block at the END of your response:
 
-Guidelines:
-- Be concise but thorough
-- Reference specific elements by their labels when relevant
-- If information is not visible in the provided DOM, say so
-- Suggest scrolling or navigation if needed information might be elsewhere
-- Format responses with clear sections when appropriate
+\`\`\`actions
+[{ "type": "navigate", "url": "https://google.com" }]
+\`\`\`
 
-Always respond in a helpful, conversational manner.`;
+Actions:
+- navigate: { "type": "navigate", "url": "https://..." }
+- click: { "type": "click", "label": 0 }
+- type: { "type": "type", "label": 0, "value": "text" }
+- scroll: { "type": "scroll", "direction": "down" }
+- back: { "type": "back" }
+
+## Response style
+- Be concise and natural
+- For navigation requests, just do it with a brief acknowledgment
+- Don't be verbose about what you're doing
+- If you can't do something, explain briefly why`;
+
+/**
+ * Agent System Prompt - For when actively analyzing/interacting with a page
+ */
+const AGENT_SYSTEM_PROMPT = `You are analyzing a web page to help the user. You can see the page elements and optionally a screenshot.
+
+## Page Elements
+Elements are labeled [0], [1], [2], etc. Use these labels for click/type actions.
+
+## How to respond
+- Describe what you see or answer the user's question
+- If you need to interact, add actions at the end:
+\`\`\`actions
+[{ "type": "click", "label": 0 }]
+\`\`\`
+
+- If the task is complete, respond without actions
+- If stuck, explain why and don't add actions
+
+Available actions: navigate, click, type, scroll, back, wait`;
+
+// Keep old name for backward compatibility
+const SYSTEM_PROMPT_TEXT = AGENT_SYSTEM_PROMPT;
 
 /**
  * System prompt object with cache control (for Anthropic direct API)
@@ -276,6 +458,14 @@ function buildPageStateMessage(observation) {
   message += '\nWhat actions should I take next? Return JSON array only.';
 
   return message;
+}
+
+// Checkpoint after system prompts
+try {
+  initializationLogs.push('[CHECKPOINT 1.5] After system prompts defined');
+  console.log('[Offscreen] Checkpoint 1.5 passed');
+} catch (e) {
+  console.error('[Offscreen] Checkpoint 1.5 failed:', e);
 }
 
 // =============================================================================
@@ -531,8 +721,8 @@ async function planActions(message) {
       { role: 'user', content: userMessage }
     ], {
       systemPrompt: systemPrompt,
-      maxTokens: 2000,
-      temperature: 0.3  // Deterministic for actions
+      maxTokens: 2000
+      // Temperature forced to 1.0 by extended thinking mode
     });
 
     console.log('[Offscreen] AI response for action planning:', {
@@ -590,6 +780,237 @@ async function planActions(message) {
       actions: [],
       error: error.message || 'Failed to plan actions',
       loadedModules: agentPromptAssembler.getLoadedModules()
+    };
+  }
+}
+
+// =============================================================================
+// Chat Message Handler - Simple conversational AI with tools
+// =============================================================================
+
+/**
+ * Handle a simple chat message - AI responds naturally, may include actions
+ * @param {Object} message - Chat message
+ * @param {string} message.message - User's message
+ * @param {Object} message.pageContext - Current page context (url, title)
+ * @param {Array} message.history - Conversation history
+ * @returns {Promise<Object>} AI response
+ */
+async function handleChatMessage(message) {
+  const { message: userMessage, pageContext, history = [] } = message || {};
+
+  console.log('[Offscreen] CHAT_MESSAGE:', userMessage?.substring(0, 50));
+  console.log('[Offscreen] History length:', history.length);
+  console.log('[Offscreen] Available providers:', providerManager.getProviderNames());
+  console.log('[Offscreen] Active provider:', providerManager.getActiveProviderName());
+
+  // Validate input
+  if (!userMessage || typeof userMessage !== 'string') {
+    return {
+      error: 'No message provided',
+    };
+  }
+
+  const activeProvider = providerManager.getActiveProvider();
+
+  if (!activeProvider) {
+    console.error('[Offscreen] No active provider! Registered:', providerManager.getProviderNames());
+    return {
+      error: 'No AI provider configured. Please add your API key in settings.',
+      needsAuth: true
+    };
+  }
+
+  try {
+    // Build simple context
+    let contextNote = '';
+    if (pageContext?.url && pageContext.url !== 'unknown') {
+      contextNote = `\n\n[Current tab: ${pageContext.title || pageContext.url}]`;
+    }
+
+    // Convert history to Anthropic format and add current message
+    const messages = [];
+
+    // Add history messages (already in format with role and content)
+    for (const msg of history) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({
+          role: msg.role,
+          content: msg.content
+        });
+      }
+    }
+
+    // Add current user message
+    messages.push({
+      role: 'user',
+      content: userMessage + contextNote
+    });
+
+    const options = {
+      maxTokens: 2048,
+      systemPrompt: CHAT_SYSTEM_PROMPT,
+      // Temperature forced to 1.0 by extended thinking mode
+      // Enable caching on system prompt for cost savings
+      cacheSystemPrompt: true
+    };
+
+    const response = await providerManager.sendMessage(messages, options);
+
+    console.log('[Offscreen] Chat response:', {
+      provider: providerManager.getActiveProviderName(),
+      contentLength: response.content?.length
+    });
+
+    return {
+      success: true,
+      content: response.content,
+      model: response.model,
+      usage: response.usage,
+      provider: providerManager.getActiveProviderName()
+    };
+
+  } catch (error) {
+    console.error('[Offscreen] Chat error:', error);
+    return {
+      error: error.message,
+      provider: providerManager.getActiveProviderName()
+    };
+  }
+}
+
+// =============================================================================
+// Agentic Step Handler (with Screenshot/Vision Support)
+// =============================================================================
+
+/**
+ * Handle a single agent step in the observe-plan-act loop
+ * Supports multimodal input (screenshot + DOM) for vision-capable models
+ * @param {Object} message - Agent step message
+ * @param {string} message.goal - User's goal
+ * @param {number} message.iteration - Current iteration number
+ * @param {string} message.dom - Pruned DOM content with labeled elements
+ * @param {string} message.url - Current page URL
+ * @param {string} message.title - Current page title
+ * @param {string} message.screenshot - Base64 data URL of screenshot (optional)
+ * @returns {Promise<Object>} AI response with planned actions
+ */
+async function handleAgentStep(message) {
+  const { goal, iteration, dom, url, title, screenshot } = message;
+
+  console.log('[Offscreen] AGENT_STEP:', {
+    goal: goal?.substring(0, 50),
+    iteration,
+    url,
+    hasScreenshot: !!screenshot
+  });
+
+  const activeProvider = providerManager.getActiveProvider();
+
+  if (!activeProvider) {
+    return {
+      error: 'No AI provider configured. Please set up authentication.',
+      needsAuth: true
+    };
+  }
+
+  try {
+    // Build the context message
+    let contextText = `Iteration ${iteration}\n\n`;
+    contextText += `Goal: ${goal}\n\n`;
+    contextText += `Current Page:\n`;
+    contextText += `URL: ${url}\n`;
+    contextText += `Title: ${title}\n\n`;
+    contextText += `Page Elements:\n${dom}\n\n`;
+    contextText += `Based on the current page state${screenshot ? ' and screenshot' : ''}, what actions should I take to achieve the goal?\n`;
+    contextText += `If the goal is achieved, respond with just text (no actions). Otherwise, include actions.`;
+
+    // Build message content - with or without screenshot
+    let messageContent;
+
+    if (screenshot && screenshot.startsWith('data:image/')) {
+      // Extract base64 data from data URL
+      const base64Match = screenshot.match(/^data:image\/(jpeg|png|gif|webp);base64,(.+)$/);
+
+      if (base64Match) {
+        const mediaType = `image/${base64Match[1]}`;
+        const base64Data = base64Match[2];
+
+        // Multimodal message with image + text
+        messageContent = [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: base64Data
+            }
+          },
+          {
+            type: 'text',
+            text: contextText
+          }
+        ];
+
+        console.log('[Offscreen] Including screenshot in request (multimodal)');
+      } else {
+        // Fallback to text-only if image parsing fails
+        messageContent = contextText;
+        console.warn('[Offscreen] Screenshot parsing failed, using text-only');
+      }
+    } else {
+      // Text-only message
+      messageContent = contextText;
+    }
+
+    const messages = [
+      {
+        role: 'user',
+        content: messageContent
+      }
+    ];
+
+    const options = {
+      maxTokens: CONFIG.maxTokens,
+      systemPrompt: SYSTEM_PROMPT_TEXT
+      // Temperature forced to 1.0 by extended thinking mode
+    };
+
+    const response = await providerManager.sendMessage(messages, options);
+
+    console.log('[Offscreen] AGENT_STEP response:', {
+      provider: providerManager.getActiveProviderName(),
+      model: response.model,
+      contentLength: response.content?.length,
+      usage: response.usage
+    });
+
+    return {
+      success: true,
+      content: response.content,
+      model: response.model,
+      usage: response.usage,
+      provider: providerManager.getActiveProviderName()
+    };
+
+  } catch (error) {
+    console.error('[Offscreen] AGENT_STEP error:', error);
+
+    // Attempt provider recovery for certain errors
+    if (error.retryable === false && providerManager.getProviderNames().length > 1) {
+      console.log('[Offscreen] Attempting provider recovery...');
+      const recovery = await providerManager.attemptRecovery();
+      if (recovery.recovered) {
+        console.log(`[Offscreen] Recovered to provider: ${recovery.provider}`);
+        return handleAgentStep(message); // Retry with new provider
+      }
+    }
+
+    return {
+      error: error.message,
+      errorCode: error.statusCode,
+      retryable: error.retryable !== false,
+      provider: providerManager.getActiveProviderName()
     };
   }
 }
@@ -730,6 +1151,14 @@ async function handleStreamingWithBackendProxy(port, params) {
       return;
     }
 
+    if (!response.body) {
+      port.postMessage({
+        error: 'Response body is null - streaming not supported',
+        done: true
+      });
+      return;
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -794,38 +1223,8 @@ async function handleStreamingWithBackendProxy(port, params) {
 }
 
 // =============================================================================
-// Message Handling
+// Message Routing (handler registered early at top of file)
 // =============================================================================
-
-/**
- * Main message handler for offscreen document
- * Routes messages to appropriate handlers based on action
- */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // Only handle messages targeted at offscreen document
-  if (message.target !== 'offscreen') {
-    return false;
-  }
-
-  console.log('[Offscreen] Received message:', message.action);
-
-  // Route to appropriate handler
-  handleMessage(message)
-    .then(result => {
-      console.log('[Offscreen] Sending response for:', message.action);
-      sendResponse(result);
-    })
-    .catch(error => {
-      console.error('[Offscreen] Error handling message:', error);
-      sendResponse({
-        error: error.message,
-        action: message.action
-      });
-    });
-
-  // Return true to indicate async response
-  return true;
-});
 
 /**
  * Route message to appropriate handler
@@ -887,13 +1286,13 @@ async function handleMessage(message) {
       // Agent automation action planning
       return await planActions(message);
 
-    case 'PING':
-      return {
-        status: 'alive',
-        timestamp: Date.now(),
-        document: 'offscreen',
-        activeProvider: providerManager.getActiveProviderName()
-      };
+    case 'AGENT_STEP':
+      // Unified agentic step with screenshot support
+      return await handleAgentStep(message);
+
+    case 'CHAT_MESSAGE':
+      // Simple chat - AI responds naturally and may request browser actions
+      return await handleChatMessage(message);
 
     default:
       throw new Error(`Unknown action: ${message.action}`);
@@ -931,28 +1330,49 @@ chrome.runtime.onConnect.addListener((port) => {
 
 /**
  * Initialize the offscreen document
+ * - Load modules dynamically
  * - Set up providers from stored API keys
  * - Listen for configuration changes
  */
 async function initialize() {
-  console.log('[Offscreen] Document loading...');
+  logProgress('init_start', 'Starting initialization');
 
   try {
-    const result = await initializeProviders();
-    console.log('[Offscreen] Initialization result:', result);
-
-    if (!result.success) {
-      console.warn('[Offscreen] Provider initialization warning:', result.error);
+    // Step 1: Load modules
+    const modulesLoaded = await loadModules();
+    if (!modulesLoaded) {
+      logProgress('init_failed', 'Module loading failed, stopping');
+      return;
     }
 
-    console.log('[Offscreen] Document loaded and ready');
-    console.log('[Offscreen] Available providers:', providerManager.getProviderNames());
-    console.log('[Offscreen] Active provider:', providerManager.getActiveProviderName() || 'none');
+    // Step 2: Initialize providers
+    logProgress('init_providers_start', 'Initializing providers');
+    const result = await initializeProviders();
+
+    if (!result.success) {
+      logProgress('init_providers_warning', result.error || 'Provider init returned success=false');
+      initializationError = result.error || 'Provider initialization failed';
+    } else {
+      providersReady = true;
+      const providerList = providerManager.getProviderNames().join(', ') || 'none';
+      const active = providerManager.getActiveProviderName() || 'none';
+      logProgress('init_complete', `Ready! Providers: [${providerList}], Active: ${active}`);
+    }
 
   } catch (error) {
-    console.error('[Offscreen] Initialization error:', error);
+    logProgress('init_error', `${error.name}: ${error.message}`);
+    console.error('[Offscreen] Error stack:', error.stack);
+    initializationError = `Initialization failed: ${error.message}`;
   }
 }
 
-// Run initialization on document load
+// Checkpoint before calling initialize
+try {
+  initializationLogs.push('[CHECKPOINT 2] Reached end of script');
+  console.log('[Offscreen] Checkpoint 2: About to call initialize()');
+} catch (e) {
+  console.error('[Offscreen] Checkpoint 2 failed:', e);
+}
+
+logProgress('script_loaded', 'Script file loaded, calling initialize()');
 initialize();

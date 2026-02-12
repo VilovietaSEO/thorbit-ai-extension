@@ -22,13 +22,23 @@ import { settingsManager } from '../utils/settings-manager.js';
 const elements = {
   // Provider settings
   providerSelect: document.getElementById('provider-select'),
+  providerStatus: document.getElementById('provider-status'),
+
+  // Provider-specific settings containers
+  anthropicSettings: document.getElementById('anthropic-settings'),
+  openrouterSettings: document.getElementById('openrouter-settings'),
+  customSettings: document.getElementById('custom-settings'),
+
+  // API keys
   anthropicKey: document.getElementById('anthropic-key'),
   openrouterKey: document.getElementById('openrouter-key'),
   customEndpoint: document.getElementById('custom-endpoint'),
   customKey: document.getElementById('custom-key'),
-  customEndpointGroup: document.getElementById('custom-endpoint-group'),
-  customKeyGroup: document.getElementById('custom-key-group'),
-  modelSelect: document.getElementById('model-select'),
+  customModel: document.getElementById('custom-model'),
+
+  // Model selects (separate for each provider)
+  anthropicModelSelect: document.getElementById('anthropic-model-select'),
+  openrouterModelSelect: document.getElementById('openrouter-model-select'),
 
   // System prompt
   systemPrompt: document.getElementById('system-prompt'),
@@ -126,7 +136,24 @@ async function loadSettings() {
     elements.openrouterKey.value = settings.apiKeys.openrouter || '';
     elements.customEndpoint.value = settings.customEndpoint || '';
     elements.customKey.value = settings.apiKeys.custom || '';
-    elements.modelSelect.value = settings.model;
+    elements.customModel.value = settings.customModel || '';
+
+    // Set model for each provider
+    if (settings.models) {
+      if (settings.models.anthropic) {
+        elements.anthropicModelSelect.value = settings.models.anthropic;
+      }
+      if (settings.models.openrouter) {
+        elements.openrouterModelSelect.value = settings.models.openrouter;
+      }
+    } else if (settings.model) {
+      // Legacy: single model field - try to set the appropriate dropdown
+      if (settings.model.startsWith('claude-')) {
+        elements.anthropicModelSelect.value = settings.model;
+      } else {
+        elements.openrouterModelSelect.value = settings.model;
+      }
+    }
 
     // System prompt
     elements.systemPrompt.value = settings.systemPrompt || '';
@@ -193,15 +220,41 @@ function saveSettings() {
  * @returns {Object} Settings object
  */
 function gatherSettingsFromUI() {
+  const provider = elements.providerSelect.value;
+
+  // Get the active model based on current provider
+  let activeModel;
+  switch (provider) {
+    case 'anthropic':
+      activeModel = elements.anthropicModelSelect.value;
+      break;
+    case 'openrouter':
+      activeModel = elements.openrouterModelSelect.value;
+      break;
+    case 'custom':
+      activeModel = elements.customModel.value;
+      break;
+    default:
+      activeModel = elements.anthropicModelSelect.value;
+  }
+
   return {
-    provider: elements.providerSelect.value,
+    provider: provider,
     apiKeys: {
       anthropic: elements.anthropicKey.value,
       openrouter: elements.openrouterKey.value,
       custom: elements.customKey.value
     },
     customEndpoint: elements.customEndpoint.value,
-    model: elements.modelSelect.value,
+    customModel: elements.customModel.value,
+    // Store models per provider for easy switching
+    models: {
+      anthropic: elements.anthropicModelSelect.value,
+      openrouter: elements.openrouterModelSelect.value,
+      custom: elements.customModel.value
+    },
+    // Active model (based on current provider)
+    model: activeModel,
     systemPrompt: elements.systemPrompt.value,
     behavior: {
       autoAnalyzeOnLoad: elements.autoAnalyze.checked,
@@ -251,8 +304,12 @@ function setupEventListeners() {
     saveSettings();
   });
 
-  // Model select
-  elements.modelSelect.addEventListener('change', saveSettings);
+  // Model selects (one per provider)
+  elements.anthropicModelSelect.addEventListener('change', saveSettings);
+  elements.openrouterModelSelect.addEventListener('change', saveSettings);
+  if (elements.customModel) {
+    elements.customModel.addEventListener('input', saveSettings);
+  }
 
   // System prompt
   elements.systemPrompt.addEventListener('input', () => {
@@ -332,10 +389,30 @@ function setupEventListeners() {
  */
 function updateProviderVisibility() {
   const provider = elements.providerSelect.value;
-  const isCustom = provider === 'custom';
 
-  elements.customEndpointGroup.style.display = isCustom ? 'block' : 'none';
-  elements.customKeyGroup.style.display = isCustom ? 'block' : 'none';
+  // Hide all provider settings first
+  elements.anthropicSettings.style.display = 'none';
+  elements.openrouterSettings.style.display = 'none';
+  elements.customSettings.style.display = 'none';
+
+  // Show the selected provider's settings
+  switch (provider) {
+    case 'anthropic':
+      elements.anthropicSettings.style.display = 'block';
+      break;
+    case 'openrouter':
+      elements.openrouterSettings.style.display = 'block';
+      break;
+    case 'custom':
+      elements.customSettings.style.display = 'block';
+      break;
+  }
+
+  // Update status indicator
+  const statusText = elements.providerStatus.querySelector('.status-text');
+  if (statusText) {
+    statusText.textContent = `${provider.charAt(0).toUpperCase() + provider.slice(1)} Active`;
+  }
 }
 
 // =============================================================================

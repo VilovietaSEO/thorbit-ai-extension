@@ -74,8 +74,7 @@ class OpenRouterProvider extends AIProvider {
       name: 'openrouter',
       apiEndpoint: 'https://openrouter.ai/api/v1',
       defaultModel: config.defaultModel || 'anthropic/claude-sonnet-4.5',
-      apiKey: config.apiKey || null,
-      keySource: config.keySource || 'storage',
+      apiKey: config.apiKey || undefined,
       keyStorageKey: config.keyStorageKey || 'openrouter_api_key',
       retry: config.retry
     });
@@ -345,6 +344,10 @@ class OpenRouterProvider extends AIProvider {
     }
 
     // Process SSE stream
+    if (!response.body) {
+      throw new Error('Response body is null - streaming not supported');
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -479,7 +482,7 @@ class OpenRouterProvider extends AIProvider {
         return new RateLimitError(
           errorMessage,
           'openrouter',
-          retryAfter ? parseInt(retryAfter, 10) : null
+          retryAfter ? parseInt(retryAfter, 10) : undefined
         );
 
       case 503:

@@ -36,6 +36,7 @@ const store = createStore({
   isStreaming: false,
   currentResponse: '',
   error: null,
+  status: null, // Brief ephemeral status like "Navigating..."
   connectionStatus: 'connecting', // 'connected', 'disconnected', 'connecting'
 });
 
@@ -99,6 +100,7 @@ const handleServiceWorkerMessage = (msg) => {
       store.setState((state) => ({
         currentResponse: state.currentResponse + msg.text,
         isStreaming: true,
+        status: null, // Clear status when content arrives
       }));
       render();
       break;
@@ -116,8 +118,15 @@ const handleServiceWorkerMessage = (msg) => {
           currentResponse: '',
           isStreaming: false,
           isLoading: false,
+          status: null,
         });
         persistState();
+      } else {
+        store.setState({
+          isStreaming: false,
+          isLoading: false,
+          status: null,
+        });
       }
       render();
       break;
@@ -128,7 +137,14 @@ const handleServiceWorkerMessage = (msg) => {
         isStreaming: false,
         isLoading: false,
         currentResponse: '',
+        status: null,
       });
+      render();
+      break;
+
+    case 'STATUS':
+      // Brief ephemeral status (e.g., "Navigating...", "Clicking...")
+      store.setState({ status: msg.status });
       render();
       break;
 
@@ -144,6 +160,24 @@ const handleServiceWorkerMessage = (msg) => {
 
 const sendMessage = async (content) => {
   const { messages } = store.getState();
+
+  // Handle debug command
+  if (content.trim() === '/debug') {
+    try {
+      const result = await chrome.runtime.sendMessage({ type: 'DEBUG_STATUS' });
+      const debugMessage = {
+        id: Date.now(),
+        role: 'assistant',
+        content: '```\n' + JSON.stringify(result, null, 2) + '\n```',
+        timestamp: new Date().toISOString(),
+      };
+      store.setState({ messages: [...messages, debugMessage] });
+      render();
+    } catch (e) {
+      console.error('Debug failed:', e);
+    }
+    return;
+  }
 
   // Add user message
   const userMessage = {
@@ -164,10 +198,12 @@ const sendMessage = async (content) => {
   render();
 
   try {
-    // Send to service worker
+    // Send to service worker with full conversation history
+    const { messages } = store.getState();
     await chrome.runtime.sendMessage({
       type: 'ANALYZE_PAGE',
       prompt: content,
+      history: messages.slice(0, -1) // All messages except the one we just added
     });
   } catch (e) {
     console.error('Failed to send message:', e);
@@ -257,10 +293,10 @@ const renderStreamingMessage = (content) => `
   </div>
 `;
 
-const renderLoadingIndicator = () => `
+const renderLoadingIndicator = (statusText = null) => `
   <div class="loading-indicator">
     <div class="loading-spinner"></div>
-    <span>Analyzing page...</span>
+    <span>${statusText || 'Thinking...'}</span>
   </div>
 `;
 
@@ -271,9 +307,9 @@ const renderError = (error) => `
 `;
 
 const renderChatArea = () => {
-  const { messages, isLoading, isStreaming, currentResponse, error } = store.getState();
+  const { messages, isLoading, isStreaming, currentResponse, error, status } = store.getState();
 
-  if (messages.length === 0 && !isLoading && !isStreaming && !error) {
+  if (messages.length === 0 && !isLoading && !isStreaming && !error && !status) {
     return `<div class="chat-area">${renderEmptyState()}</div>`;
   }
 
@@ -281,8 +317,8 @@ const renderChatArea = () => {
 
   if (isStreaming && currentResponse) {
     content += renderStreamingMessage(currentResponse);
-  } else if (isLoading) {
-    content += renderLoadingIndicator();
+  } else if (isLoading || status) {
+    content += renderLoadingIndicator(status);
   }
 
   if (error) {
@@ -361,7 +397,8 @@ const render = () => {
 const bindEvents = () => {
   // Send button
   const sendBtn = document.getElementById('send-btn');
-  const input = document.getElementById('message-input');
+  /** @type {HTMLTextAreaElement|null} */
+  const input = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('message-input'));
 
   if (sendBtn && input) {
     sendBtn.addEventListener('click', () => {
@@ -633,7 +670,8 @@ const hideApprovalModal = () => {
 const bindApprovalModalEvents = () => {
   const approveBtn = document.getElementById('approve-action-btn');
   const denyBtn = document.getElementById('deny-action-btn');
-  const overlay = document.querySelector('.modal-overlay');
+  /** @type {HTMLElement|null} */
+  const overlay = /** @type {HTMLElement|null} */ (document.querySelector('.modal-overlay'));
 
   if (approveBtn) {
     approveBtn.onclick = async () => {

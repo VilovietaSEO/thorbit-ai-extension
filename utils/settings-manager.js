@@ -35,9 +35,17 @@ const DEFAULT_SETTINGS = {
 
   // Custom endpoint for self-hosted or alternative APIs
   customEndpoint: '',
+  customModel: '',
 
-  // Model selection
-  model: 'claude-sonnet-4-20250514',
+  // Model selection per provider
+  models: {
+    anthropic: 'claude-sonnet-4-5-20250929',
+    openrouter: 'mistralai/mistral-large-2411',
+    custom: ''
+  },
+
+  // Active model (based on current provider)
+  model: 'claude-sonnet-4-5-20250929',
 
   // System prompt for AI interactions
   systemPrompt: '',

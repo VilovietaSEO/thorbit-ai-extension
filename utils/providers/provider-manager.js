@@ -270,7 +270,7 @@ class ProviderManager {
    * @param {string[]} [preferenceOrder] - Ordered list of preferred providers
    * @returns {Promise<string|null>} Name of first ready provider
    */
-  async findReadyProvider(preferenceOrder = null) {
+  async findReadyProvider(preferenceOrder = undefined) {
     const order = preferenceOrder || this.getProviderNames();
 
     for (const name of order) {
@@ -291,7 +291,7 @@ class ProviderManager {
    * @param {string[]} [fallbackOrder] - Preferred fallback order
    * @returns {Promise<{recovered: boolean, provider?: string, error?: string}>}
    */
-  async attemptRecovery(fallbackOrder = null) {
+  async attemptRecovery(fallbackOrder = undefined) {
     const readyProvider = await this.findReadyProvider(fallbackOrder);
 
     if (readyProvider) {
@@ -373,7 +373,10 @@ class ProviderManager {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, []);
     }
-    this.listeners.get(event).push(callback);
+    const listeners = this.listeners.get(event);
+    if (listeners) {
+      listeners.push(callback);
+    }
   }
 
   /**

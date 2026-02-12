@@ -59,11 +59,25 @@ const DANGEROUS_PATTERNS = [
 // AutomationEngine Class
 // =============================================================================
 
+/**
+ * @typedef {Object} AutomationState
+ * @property {'idle'|'running'|'paused'|'awaiting_approval'|'error'|'goal_complete'} phase
+ * @property {string|null} goal
+ * @property {number} step
+ * @property {Object} context
+ * @property {Array} history
+ * @property {Object|null} pendingAction
+ * @property {string|null} error
+ * @property {number|null} startedAt
+ * @property {number|null} lastUpdatedAt
+ */
+
 class AutomationEngine {
   /**
    * Create a new AutomationEngine instance
    */
   constructor() {
+    /** @type {AutomationState} */
     this.state = {
       phase: 'idle',
       goal: null,
@@ -544,7 +558,7 @@ class AutomationEngine {
       url: observation.domState?.url,
       hasScreenshot: !!observation.screenshot,
       domState: observation.domState,
-      goal: this.state.goal,
+      goal: this.state.goal || '',
       history: this.state.history.slice(-10), // Last 10 actions
       userSystemPrompt,
       siteRules
@@ -904,7 +918,7 @@ What actions should I take to achieve the goal?`
         target: { tabId },
         func: (x, y) => {
           const element = document.elementFromPoint(x, y);
-          if (element) {
+          if (element && element instanceof HTMLElement) {
             element.click();
             return { success: true };
           }

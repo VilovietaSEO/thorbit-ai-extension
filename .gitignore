@@ -1,0 +1,22 @@
+.DS_Store
+
+# Local secrets (do not commit)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+config.local.js
+
+# Dependencies
+node_modules/
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db

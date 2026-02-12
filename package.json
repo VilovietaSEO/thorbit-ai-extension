@@ -1,0 +1,13 @@
+{
+  "name": "thorbit-ai-extension",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "check": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.20.9",
+    "typescript": "^5.9.3"
+  }
+}

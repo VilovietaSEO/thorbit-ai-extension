@@ -19,6 +19,9 @@ import { getAutomationEngine, LOOP_ALARM_NAME } from './utils/automation-engine.
 const KEEPALIVE_INTERVAL_MINUTES = 0.4; // ~24 seconds - survives 30s termination
 const KEEPALIVE_ALARM_NAME = 'keepalive';
 
+// Track connected sidepanel ports to send responses
+const connectedPorts = new Map();
+
 // =============================================================================
 // Message Router
 // =============================================================================
@@ -160,8 +163,14 @@ async function ensureOffscreenDocument(path = 'offscreen.html') {
  * @returns {Promise<Object>} Response from offscreen document
  */
 async function sendToOffscreen(message) {
-  await ensureOffscreenDocument('offscreen.html');
-  return chrome.runtime.sendMessage({ target: 'offscreen', ...message });
+  try {
+    await ensureOffscreenDocument('offscreen.html');
+    const response = await chrome.runtime.sendMessage({ target: 'offscreen', ...message });
+    return response;
+  } catch (error) {
+    console.error('[Offscreen] Communication error:', error);
+    return { error: `Communication failed: ${error.message}` };
+  }
 }
 
 // =============================================================================
@@ -237,52 +246,709 @@ async function resumePendingTask(task) {
 // Message Handlers
 // =============================================================================
 
-// Handler: Analyze current page
-MessageRouter.register('ANALYZE_PAGE', async (message, sender) => {
-  console.log('[Handler] ANALYZE_PAGE from:', sender.tab?.id || 'unknown');
+/**
+ * Check if a tab is accessible for automation
+ * @param {number} tabId - Tab ID to check
+ * @returns {Promise<{accessible: boolean, error?: string, url?: string}>}
+ */
+async function isTabAccessible(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab) {
+      return { accessible: false, error: 'Tab does not exist' };
+    }
 
-  // Store as pending task in case of termination
-  await persistState('pendingTask', {
-    type: 'DOM_ANALYSIS',
-    tabId: sender.tab?.id,
-    timestamp: Date.now()
-  });
+    const url = tab.url || '';
+
+    // Check for restricted URLs where content scripts can't run
+    if (url.startsWith('chrome://') ||
+        url.startsWith('chrome-extension://') ||
+        url.startsWith('about:') ||
+        url.startsWith('data:') ||
+        url.startsWith('file://') ||
+        url === '' ||
+        url === 'chrome://newtab/') {
+      return {
+        accessible: false,
+        error: `Cannot automate this page type: ${url.split('/')[0] || 'empty'}`,
+        url
+      };
+    }
+
+    return { accessible: true, url };
+  } catch (error) {
+    return { accessible: false, error: `Tab error: ${error.message}` };
+  }
+}
+
+/**
+ * Send message to content script with retry logic and exponential backoff
+ * @param {number} tabId - Tab ID
+ * @param {Object} message - Message to send
+ * @param {number} maxRetries - Maximum retry attempts
+ * @returns {Promise<Object>} Response from content script
+ */
+async function sendMessageWithRetry(tabId, message, maxRetries = 5) {
+  let lastError;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Check if tab is still accessible before each attempt
+      const tabCheck = await isTabAccessible(tabId);
+      if (!tabCheck.accessible) {
+        throw new Error(tabCheck.error);
+      }
+
+      const response = await chrome.tabs.sendMessage(tabId, message);
+      return response;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[Handler] Message attempt ${attempt + 1}/${maxRetries} failed:`, error.message);
+
+      // Don't retry if it's a definite error (not just timing)
+      if (error.message.includes('Cannot automate') ||
+          error.message.includes('Tab does not exist') ||
+          error.message.includes('Tab error')) {
+        throw error;
+      }
+
+      // Exponential backoff: 200ms, 400ms, 800ms, 1600ms, 3200ms
+      if (attempt < maxRetries - 1) {
+        const delay = 200 * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+
+  throw new Error(`Failed to communicate with page after ${maxRetries} attempts. ${lastError?.message || ''}`);
+}
+
+/**
+ * Inject content script manually if not already loaded
+ * @param {number} tabId - Tab ID
+ * @returns {Promise<boolean>} Whether injection succeeded
+ */
+async function ensureContentScriptLoaded(tabId) {
+  try {
+    // Try to ping the content script first
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+    if (response?.success || response?.ready) {
+      return true;
+    }
+  } catch (e) {
+    // Content script not loaded, try to inject it
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content-script.js']
+      });
+      // Wait a moment for the script to initialize
+      await new Promise(r => setTimeout(r, 100));
+      return true;
+    } catch (injectError) {
+      console.error('[Handler] Failed to inject content script:', injectError.message);
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Format interactive elements for the AI
+ * Creates a readable list of elements with labels
+ * @param {Array} elements - Interactive elements from DOM extraction
+ * @returns {string} Formatted element list
+ */
+function formatInteractiveElements(elements) {
+  if (!elements || elements.length === 0) {
+    return 'No interactive elements found on this page.';
+  }
+
+  const lines = [];
+  for (const el of elements.slice(0, 50)) { // Limit to 50 elements
+    const tag = el.tag?.toLowerCase() || 'element';
+    const text = el.text || el.attributes?.placeholder || el.attributes?.['aria-label'] || el.attributes?.value || '';
+    const type = el.attributes?.type ? ` (${el.attributes.type})` : '';
+    const href = el.attributes?.href ? ` → ${el.attributes.href.slice(0, 50)}` : '';
+
+    let line = `[${el.label}] ${tag}${type}`;
+    if (text) {
+      line += ` - "${text.slice(0, 60)}"`;
+    }
+    if (href) {
+      line += href;
+    }
+    lines.push(line);
+  }
+
+  if (elements.length > 50) {
+    lines.push(`... and ${elements.length - 50} more elements`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Parse actions from AI response
+ * Looks for ```actions [...] ``` blocks
+ * @param {string} content - AI response content
+ * @returns {{ text: string, actions: Array }} Parsed text and actions
+ */
+function parseActionsFromResponse(content) {
+  if (!content) return { text: '', actions: [] };
+
+  // Look for ```actions [...] ``` block
+  const actionsMatch = content.match(/```actions\s*([\s\S]*?)```/);
+
+  if (!actionsMatch) {
+    return { text: content, actions: [] };
+  }
+
+  // Extract text before the actions block
+  const text = content.replace(/```actions\s*[\s\S]*?```/, '').trim();
+
+  // Parse the JSON actions
+  try {
+    const actions = JSON.parse(actionsMatch[1].trim());
+    if (Array.isArray(actions)) {
+      return { text, actions };
+    }
+  } catch (e) {
+    console.warn('[Handler] Failed to parse actions JSON:', e);
+  }
+
+  return { text: content, actions: [] };
+}
+
+/**
+ * Execute a single action
+ * @param {number} tabId - Tab to execute action on
+ * @param {Object} action - Action to execute
+ * @returns {Promise<Object>} Action result
+ */
+async function executeAction(tabId, action) {
+  console.log('[Handler] Executing action:', action.type, action);
+
+  // Validate tab before most actions
+  if (action.type !== 'wait') {
+    const tabCheck = await isTabAccessible(tabId);
+    if (!tabCheck.accessible && action.type !== 'navigate') {
+      return { success: false, error: tabCheck.error };
+    }
+  }
 
   try {
-    // Get active tab if sender doesn't have tab info
+    switch (action.type) {
+      case 'navigate':
+        if (!action.url) return { success: false, error: 'No URL provided' };
+        // Normalize URL
+        let url = action.url;
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = 'https://' + url;
+        }
+        await chrome.tabs.update(tabId, { url });
+        // Wait for navigation to start and content script to load
+        await new Promise(r => setTimeout(r, 1500));
+        // Try to ensure content script is loaded on new page
+        await ensureContentScriptLoaded(tabId);
+        return { success: true, action: 'navigate', url };
+
+      case 'click':
+        if (action.label === undefined) return { success: false, error: 'No label provided' };
+        return await sendMessageWithRetry(tabId, {
+          type: 'EXECUTE_ACTION',
+          action: 'click',
+          label: action.label
+        });
+
+      case 'type':
+        if (action.label === undefined || !action.value) {
+          return { success: false, error: 'Label and value required' };
+        }
+        return await sendMessageWithRetry(tabId, {
+          type: 'EXECUTE_ACTION',
+          action: 'type',
+          label: action.label,
+          value: action.value
+        });
+
+      case 'scroll':
+        return await sendMessageWithRetry(tabId, {
+          type: 'SCROLL_PAGE',
+          direction: action.direction || 'down',
+          amount: action.amount || 500
+        });
+
+      case 'wait':
+        const ms = action.ms || 1000;
+        await new Promise(resolve => setTimeout(resolve, ms));
+        return { success: true, action: 'wait', ms };
+
+      case 'back':
+        await chrome.tabs.goBack(tabId);
+        await new Promise(r => setTimeout(r, 1000));
+        return { success: true, action: 'back' };
+
+      case 'refresh':
+        await chrome.tabs.reload(tabId);
+        await new Promise(r => setTimeout(r, 1500));
+        return { success: true, action: 'refresh' };
+
+      default:
+        return { success: false, error: `Unknown action: ${action.type}` };
+    }
+  } catch (error) {
+    console.error('[Handler] Action execution error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Capture screenshot of the current tab
+ * @param {number} tabId - Tab ID
+ * @returns {Promise<string|null>} Base64 screenshot or null
+ */
+async function captureScreenshot(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.windowId) return null;
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+      format: 'jpeg',
+      quality: 80
+    });
+    return dataUrl;
+  } catch (error) {
+    console.warn('[Screenshot] Capture failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Handle a user chat message - AI responds and may use browser tools
+ * @param {string} userMessage - User's message
+ * @param {number} tabId - Current tab ID (for context, not mandatory automation)
+ * @param {Array} history - Conversation history
+ */
+async function handleUserMessage(userMessage, tabId, history = []) {
+  console.log('[Agent] Processing user message:', userMessage.substring(0, 50));
+
+  // Get current tab context (URL, title) - lightweight, no DOM extraction yet
+  let pageContext = { url: 'unknown', title: 'unknown' };
+  try {
+    if (tabId) {
+      const tabCheck = await isTabAccessible(tabId);
+      if (tabCheck.accessible) {
+        const tab = await chrome.tabs.get(tabId);
+        pageContext = { url: tab.url || 'unknown', title: tab.title || 'unknown' };
+      }
+    }
+  } catch (e) {
+    // Ignore - we'll work without page context
+  }
+
+  // Send to AI with conversation history
+  let aiResult;
+  try {
+    aiResult = await sendToOffscreen({
+      action: 'CHAT_MESSAGE',
+      message: userMessage,
+      pageContext: pageContext,
+      history: history
+    });
+  } catch (e) {
+    console.error('[Agent] Failed to send to offscreen:', e);
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: 'Failed to connect to AI service. Please try again.'
+    });
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+    return;
+  }
+
+  // Check if we got a valid response
+  if (!aiResult) {
+    console.error('[Agent] aiResult is falsy:', aiResult);
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: 'No response from AI service. Please check your API key in settings.'
+    });
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+    return;
+  }
+
+  console.log('[Agent] AI result received:', {
+    hasError: !!aiResult.error,
+    hasContent: !!aiResult.content,
+    provider: aiResult.provider,
+    needsAuth: aiResult.needsAuth
+  });
+
+  // Check for errors in the response
+  if (aiResult.error) {
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: aiResult.error
+    });
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+    return;
+  }
+
+  // Check if we have content
+  if (!aiResult.content) {
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: 'AI returned an empty response.'
+    });
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+    return;
+  }
+
+  // Parse response for text and actions
+  const { text, actions } = parseActionsFromResponse(aiResult.content);
+
+  // Show AI's response text
+  if (text) {
+    broadcastToSidepanel({ type: 'STREAM_CHUNK', text: text });
+  }
+
+  // Execute any actions the AI requested and continue agentic loop if needed
+  if (actions && actions.length > 0) {
+    await executeActionsWithAgenticLoop(actions, tabId, userMessage, history);
+  } else {
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+  }
+}
+
+/**
+ * Execute actions and continue agentic loop for multi-step tasks
+ * @param {Array} actions - Actions to execute
+ * @param {number} tabId - Tab ID
+ * @param {string} originalGoal - User's original goal
+ * @param {Array} history - Conversation history
+ * @param {number} maxIterations - Safety limit
+ */
+async function executeActionsWithAgenticLoop(actions, tabId, originalGoal, history = [], maxIterations = 5) {
+  let iteration = 0;
+
+  while (iteration < maxIterations) {
+    iteration++;
+
+    // Execute current actions
+    await executeActionsSequence(actions, tabId);
+
+    // Wait for page to settle
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Check if tab is still accessible
+    const tabCheck = await isTabAccessible(tabId);
+    if (!tabCheck.accessible) {
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+      return;
+    }
+
+    // Extract DOM to see new page state
+    let domResult;
+    try {
+      domResult = await sendMessageWithRetry(tabId, { type: 'EXTRACT_DOM' });
+    } catch (e) {
+      console.log('[Agent] Could not read page, ending loop:', e.message);
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+      return;
+    }
+
+    if (!domResult.success) {
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+      return;
+    }
+
+    const pageData = domResult.data;
+    const elementsText = formatInteractiveElements(pageData.interactiveElements);
+
+    // Ask AI what to do next
+    const nextResult = await sendToOffscreen({
+      action: 'AGENT_STEP',
+      goal: originalGoal,
+      iteration: iteration,
+      dom: elementsText,
+      url: pageData.url,
+      title: pageData.title
+    });
+
+    if (nextResult.error) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Could not continue: ${nextResult.error})`
+      });
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+      return;
+    }
+
+    const { text: nextText, actions: nextActions } = parseActionsFromResponse(nextResult.content);
+
+    if (nextText) {
+      broadcastToSidepanel({ type: 'STREAM_CHUNK', text: '\n\n' + nextText });
+    }
+
+    // No more actions = task complete
+    if (!nextActions || nextActions.length === 0 || nextActions[0]?.type === 'done') {
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+      return;
+    }
+
+    // Continue with next actions
+    actions = nextActions;
+  }
+
+  // Max iterations reached
+  broadcastToSidepanel({
+    type: 'STREAM_CHUNK',
+    text: '\n\n(Reached maximum steps, stopping)'
+  });
+  broadcastToSidepanel({ type: 'STREAM_DONE' });
+}
+
+/**
+ * Execute a sequence of actions, with optional follow-up observation
+ * @param {Array} actions - Actions to execute
+ * @param {number} tabId - Tab ID
+ */
+async function executeActionsSequence(actions, tabId) {
+  for (const action of actions) {
+    // Show brief status
+    broadcastToSidepanel({
+      type: 'STATUS',
+      status: getActionStatus(action)
+    });
+
+    try {
+      const result = await executeAction(tabId, action);
+
+      if (!result.success) {
+        broadcastToSidepanel({
+          type: 'STREAM_CHUNK',
+          text: `\n(Could not ${action.type}: ${result.error})`
+        });
+      }
+    } catch (e) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Action failed: ${e.message})`
+      });
+    }
+
+    // Small delay between actions
+    if (action.type !== 'wait') {
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  // Clear status when done
+  broadcastToSidepanel({ type: 'STATUS', status: null });
+}
+
+/**
+ * Get a brief status message for an action
+ */
+function getActionStatus(action) {
+  switch (action.type) {
+    case 'navigate': return `Opening ${action.url}...`;
+    case 'click': return 'Clicking...';
+    case 'type': return 'Typing...';
+    case 'scroll': return 'Scrolling...';
+    case 'wait': return 'Waiting...';
+    default: return 'Working...';
+  }
+}
+
+/**
+ * Full observation loop - only used when AI explicitly needs page analysis
+ * @param {string} goal - What to analyze/accomplish
+ * @param {number} tabId - Tab to observe
+ * @param {number} maxIterations - Safety limit
+ */
+async function runObservationLoop(goal, tabId, maxIterations = 5) {
+  let iteration = 0;
+
+  while (iteration < maxIterations) {
+    iteration++;
+    console.log(`[Agent] Observation iteration ${iteration}/${maxIterations}`);
+
+    // Check tab accessibility
+    const tabCheck = await isTabAccessible(tabId);
+    if (!tabCheck.accessible) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Cannot read this page: ${tabCheck.error})`
+      });
+      break;
+    }
+
+    // Show brief status
+    broadcastToSidepanel({ type: 'STATUS', status: 'Reading page...' });
+
+    // Extract DOM
+    let domResult;
+    try {
+      domResult = await sendMessageWithRetry(tabId, { type: 'EXTRACT_DOM' });
+    } catch (e) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Could not read page: ${e.message})`
+      });
+      break;
+    }
+
+    if (!domResult.success) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Page read failed: ${domResult.error || 'unknown error'})`
+      });
+      break;
+    }
+
+    const pageData = domResult.data;
+    const elementsText = formatInteractiveElements(pageData.interactiveElements);
+    const screenshot = await captureScreenshot(tabId);
+
+    // Clear status, ask AI
+    broadcastToSidepanel({ type: 'STATUS', status: null });
+
+    const aiResult = await sendToOffscreen({
+      action: 'AGENT_STEP',
+      goal: goal,
+      iteration: iteration,
+      dom: elementsText,
+      url: pageData.url,
+      title: pageData.title,
+      screenshot: screenshot
+    });
+
+    if (aiResult.error) {
+      broadcastToSidepanel({
+        type: 'STREAM_CHUNK',
+        text: `\n(Error: ${aiResult.error})`
+      });
+      break;
+    }
+
+    const { text, actions } = parseActionsFromResponse(aiResult.content);
+
+    if (text) {
+      broadcastToSidepanel({ type: 'STREAM_CHUNK', text: text });
+    }
+
+    // No more actions = done
+    if (actions.length === 0 || actions[0]?.type === 'done') {
+      break;
+    }
+
+    // Execute actions
+    await executeActionsSequence(actions, tabId);
+
+    // Wait for page to settle
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+
+// Handler: Debug status check
+MessageRouter.register('DEBUG_STATUS', async () => {
+  const result = {
+    settings: null,
+    offscreen: null,
+    offscreenError: null,
+    timestamp: new Date().toISOString()
+  };
+
+  try {
+    // Check settings storage
+    const syncData = await chrome.storage.sync.get('settings');
+    const settings = syncData.settings || {};
+    result.settings = {
+      provider: settings.provider,
+      hasAnthropicKey: !!settings.apiKeys?.anthropic,
+      anthropicKeyLength: settings.apiKeys?.anthropic?.length || 0,
+      anthropicKeyPrefix: settings.apiKeys?.anthropic?.substring(0, 10) || 'none',
+      hasOpenRouterKey: !!settings.apiKeys?.openrouter,
+      model: settings.model
+    };
+  } catch (e) {
+    result.settingsError = e.message;
+  }
+
+  try {
+    // Check if offscreen document exists
+    const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+    result.offscreenUrl = offscreenUrl;
+
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [offscreenUrl]
+    });
+    result.offscreenExists = contexts.length > 0;
+    result.offscreenContexts = contexts.map(c => ({
+      type: c.contextType,
+      url: c.documentUrl,
+      id: c.contextId
+    }));
+
+    // Try to create it if it doesn't exist
+    if (contexts.length === 0) {
+      console.log('[DEBUG_STATUS] Creating offscreen document...');
+      await ensureOffscreenDocument('offscreen.html');
+      result.offscreenCreated = true;
+      // Wait longer for offscreen to initialize (2.5s)
+      console.log('[DEBUG_STATUS] Waiting for offscreen to initialize...');
+      await new Promise(r => setTimeout(r, 2500));
+
+      // Re-check contexts after creation
+      const newContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl]
+      });
+      result.offscreenExistsAfterCreate = newContexts.length > 0;
+    }
+
+    // Ping offscreen for provider status
+    console.log('[DEBUG_STATUS] Sending PING to offscreen...');
+    const pingStart = Date.now();
+    const offscreenStatus = await sendToOffscreen({ action: 'PING' });
+    const pingDuration = Date.now() - pingStart;
+
+    result.offscreen = offscreenStatus;
+    result.offscreenType = typeof offscreenStatus;
+    result.offscreenKeys = offscreenStatus ? Object.keys(offscreenStatus) : 'null/undefined';
+    result.pingDurationMs = pingDuration;
+  } catch (e) {
+    result.offscreenError = e.message;
+    result.offscreenErrorStack = e.stack;
+  }
+
+  return result;
+});
+
+// Handler: User chat message - AI responds naturally, uses tools as needed
+MessageRouter.register('ANALYZE_PAGE', async (message, sender) => {
+  const userMessage = message.prompt || '';
+  const history = message.history || [];
+  console.log('[Handler] Chat message:', userMessage.substring(0, 50), 'history length:', history.length);
+
+  try {
+    // Get active tab for context
     let tabId = sender.tab?.id;
     if (!tabId) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       tabId = tab?.id;
     }
 
-    if (!tabId) {
-      throw new Error('No active tab found');
-    }
+    // Handle the message - AI decides what to do
+    await handleUserMessage(userMessage, tabId, history);
 
-    // Request DOM extraction from content script
-    const domResult = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_DOM' });
+    return { success: true };
 
-    if (domResult.error) {
-      throw new Error(domResult.error);
-    }
-
-    // Send to offscreen for AI processing
-    const analysisResult = await sendToOffscreen({
-      action: 'ANALYZE_DOM',
-      dom: domResult.dom,
-      url: domResult.url,
-      title: domResult.title,
-      prompt: message.prompt || 'Analyze this page and provide insights.'
-    });
-
-    // Clear pending task on success
-    await clearState('pendingTask');
-
-    return analysisResult;
   } catch (error) {
-    console.error('[Handler] ANALYZE_PAGE error:', error);
-    await clearState('pendingTask');
+    console.error('[Handler] Chat error:', error);
+    broadcastToSidepanel({ type: 'STREAM_ERROR', error: error.message });
     return { error: error.message };
   }
 });
@@ -358,6 +1024,22 @@ MessageRouter.register('AI_REQUEST', async (message) => {
   }
 });
 
+// Handler: Get settings for offscreen document (offscreen can only use chrome.runtime)
+MessageRouter.register('GET_SETTINGS', async () => {
+  try {
+    const syncData = await chrome.storage.sync.get('settings');
+    return {
+      success: true,
+      settings: syncData.settings || {}
+    };
+  } catch (error) {
+    console.error('[Handler] GET_SETTINGS error:', error);
+    return {
+      error: error.message
+    };
+  }
+});
+
 // Handler: Health check
 MessageRouter.register('PING', async () => {
   return {
@@ -377,6 +1059,40 @@ MessageRouter.register('START_AUTOMATION', async (message) => {
   const engine = getAutomationEngine();
   await engine.start(message.goal);
   return { success: true };
+});
+
+// Handler: Forward automation events to sidepanel
+MessageRouter.register('AUTOMATION_EVENT', async (message) => {
+  console.log('[Handler] AUTOMATION_EVENT:', message.event);
+
+  // Forward to sidepanel ports
+  broadcastToSidepanel({
+    type: 'AUTOMATION_EVENT',
+    event: message.event,
+    data: message.data,
+    state: message.state
+  });
+
+  // Also send as stream for immediate feedback
+  if (message.event === 'action_executed' && message.data?.action) {
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: `\n[Action: ${message.data.action.type}] ${message.data.result?.success ? 'Success' : 'Failed'}\n`
+    });
+  } else if (message.event === 'goal_complete') {
+    broadcastToSidepanel({
+      type: 'STREAM_CHUNK',
+      text: '\nGoal completed successfully!'
+    });
+    broadcastToSidepanel({ type: 'STREAM_DONE' });
+  } else if (message.event === 'error') {
+    broadcastToSidepanel({
+      type: 'STREAM_ERROR',
+      error: message.data?.error || 'Automation error'
+    });
+  }
+
+  return { received: true };
 });
 
 // Handler: Pause running automation
@@ -517,9 +1233,22 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-// Handle port connections (for streaming responses)
+// Handle port connections (for streaming responses and sidepanel)
 chrome.runtime.onConnect.addListener((port) => {
   console.log('[ServiceWorker] Port connected:', port.name);
+
+  // Track sidepanel connections
+  if (port.name === 'sidepanel') {
+    const portId = Date.now().toString();
+    connectedPorts.set(portId, port);
+    console.log('[ServiceWorker] Sidepanel port registered:', portId);
+
+    port.onDisconnect.addListener(() => {
+      connectedPorts.delete(portId);
+      console.log('[ServiceWorker] Sidepanel port disconnected:', portId);
+    });
+    return;
+  }
 
   port.onMessage.addListener(async (message) => {
     if (message.type === 'STREAM_REQUEST') {
@@ -548,6 +1277,21 @@ chrome.runtime.onConnect.addListener((port) => {
     console.log('[ServiceWorker] Port disconnected:', port.name);
   });
 });
+
+/**
+ * Send message to all connected sidepanel ports
+ * @param {Object} message - Message to send
+ */
+function broadcastToSidepanel(message) {
+  connectedPorts.forEach((port, portId) => {
+    try {
+      port.postMessage(message);
+    } catch (error) {
+      console.error('[ServiceWorker] Failed to send to port:', portId, error);
+      connectedPorts.delete(portId);
+    }
+  });
+}
 
 // =============================================================================
 // Task Badge Management

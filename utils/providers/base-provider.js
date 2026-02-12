@@ -22,7 +22,7 @@ class ProviderError extends Error {
    * @param {boolean} [retryable=false] - Whether error is retryable
    * @param {Object} [details] - Additional error details
    */
-  constructor(message, provider, statusCode = null, retryable = false, details = {}) {
+  constructor(message, provider, statusCode = undefined, retryable = false, details = {}) {
     super(message);
     this.name = 'ProviderError';
     this.provider = provider;
@@ -54,7 +54,7 @@ class ProviderError extends Error {
  */
 class ConfigurationError extends ProviderError {
   constructor(message, provider, details = {}) {
-    super(message, provider, null, false, details);
+    super(message, provider, undefined, false, details);
     this.name = 'ConfigurationError';
   }
 }
@@ -68,7 +68,7 @@ class RateLimitError extends ProviderError {
    * @param {string} provider - Provider name
    * @param {number} [retryAfter] - Seconds until retry allowed
    */
-  constructor(message, provider, retryAfter = null) {
+  constructor(message, provider, retryAfter = undefined) {
     super(message, provider, 429, true, { retryAfter });
     this.name = 'RateLimitError';
     this.retryAfter = retryAfter;
@@ -118,10 +118,12 @@ class AuthenticationError extends ProviderError {
 /**
  * Streaming chunk from provider
  * @typedef {Object} StreamChunk
- * @property {'text'|'error'|'done'|'usage'} type - Chunk type
+ * @property {string} type - Chunk type ('text', 'error', 'done', 'usage')
  * @property {string} [text] - Text content for text chunks
  * @property {string} [error] - Error message for error chunks
+ * @property {number} [statusCode] - HTTP status code for error chunks
  * @property {Object} [usage] - Token usage for usage chunks
+ * @property {string} [finishReason] - Reason stream finished
  */
 
 // =============================================================================
@@ -195,7 +197,7 @@ class AIProvider {
    * @abstract
    * @param {Message[]} messages - Conversation messages
    * @param {RequestOptions} [options={}] - Request options
-   * @yields {StreamChunk} Streaming chunks
+   * @returns {AsyncGenerator<StreamChunk, void, unknown>} Streaming chunks
    */
   async *streamMessage(messages, options = {}) {
     throw new Error('streamMessage must be implemented by subclass');
@@ -263,7 +265,7 @@ class AIProvider {
   /**
    * Determine if an error should trigger a retry
    * @param {number} statusCode - HTTP status code
-   * @param {Error} error - Error object
+   * @param {Error} [error] - Error object
    * @returns {boolean} Whether to retry
    */
   shouldRetry(statusCode, error) {
@@ -306,7 +308,7 @@ class AIProvider {
       }
     }
 
-    throw lastError || new ProviderError('Max retries exceeded', this.name, null, false);
+    throw lastError || new ProviderError('Max retries exceeded', this.name, undefined, false);
   }
 
   /**
@@ -348,11 +350,11 @@ class AIProvider {
       return new RateLimitError(
         message,
         this.name,
-        retryAfter ? parseInt(retryAfter, 10) : null
+        retryAfter ? parseInt(retryAfter, 10) : undefined
       );
     }
 
-    const retryable = this.shouldRetry(response.status, null);
+    const retryable = this.shouldRetry(response.status, undefined);
     return new ProviderError(message, this.name, response.status, retryable, errorData);
   }
 

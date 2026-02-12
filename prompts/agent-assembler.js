@@ -276,16 +276,16 @@ class AgentPromptAssembler {
 
   /**
    * Assemble system prompt from modules based on context
-   * @param {Object} context - Assembly context
-   * @param {boolean} context.hasScreenshot - Screenshot available
-   * @param {string} context.platform - Detected platform (or auto-detect from URL)
-   * @param {boolean} context.hasForm - Form elements present
-   * @param {string} context.goal - User's goal
-   * @param {Array} context.history - Action history
-   * @param {string} context.url - Current page URL
-   * @param {Object} context.domState - DOM state with interactiveElements
-   * @param {string} context.userSystemPrompt - User's custom instructions
-   * @param {Object} context.siteRules - Allow/block rules
+   * @param {Object} [context] - Assembly context
+   * @param {boolean} [context.hasScreenshot] - Screenshot available
+   * @param {string} [context.platform] - Detected platform (or auto-detect from URL)
+   * @param {boolean} [context.hasForm] - Form elements present
+   * @param {string} [context.goal] - User's goal
+   * @param {Array} [context.history] - Action history
+   * @param {string} [context.url] - Current page URL
+   * @param {Object} [context.domState] - DOM state with interactiveElements
+   * @param {string} [context.userSystemPrompt] - User's custom instructions
+   * @param {Object} [context.siteRules] - Allow/block rules
    * @returns {string} Assembled system prompt
    */
   assemble(context = {}) {
@@ -293,7 +293,10 @@ class AgentPromptAssembler {
 
     // Auto-detect platform if not provided
     if (!context.platform && context.url) {
-      context.platform = detectPlatform(context.url);
+      const detectedPlatform = detectPlatform(context.url);
+      if (detectedPlatform) {
+        context.platform = detectedPlatform;
+      }
     }
 
     // Auto-detect forms if not provided
@@ -349,7 +352,7 @@ class AgentPromptAssembler {
     }
 
     // Action history
-    if (context.history?.length > 0) {
+    if (context.history && context.history.length > 0) {
       const historyText = context.history.map((h, i) =>
         `${i + 1}. ${h.action?.type || 'unknown'}: ${JSON.stringify(h.action)} → ${h.result?.success ? 'success' : 'failed'}`
       ).join('\n');

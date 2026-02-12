@@ -22,6 +22,7 @@ const emptyState = document.getElementById('empty-state');
 const newTaskInput = document.getElementById('new-task-input');
 const addTaskBtn = document.getElementById('add-task-btn');
 const openPanelBtn = document.getElementById('open-panel-btn');
+const settingsBtn = document.getElementById('settings-btn');
 const clearCompletedBtn = document.getElementById('clear-completed-btn');
 const taskCountEl = document.getElementById('task-count');
 
@@ -292,6 +293,11 @@ clearCompletedBtn.addEventListener('click', clearCompleted);
 
 // Open side panel
 openPanelBtn.addEventListener('click', openSidePanel);
+
+// Open settings/options page
+settingsBtn.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
 
 // Listen for storage changes from other contexts
 chrome.storage.onChanged.addListener((changes, namespace) => {
