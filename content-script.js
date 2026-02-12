@@ -145,6 +145,84 @@
   // Listen for settings changes
   setupSettingsListener();
 
+  // =============================================================================
+  // Digest / Hash Computation for UI Change Detection
+  // =============================================================================
+
+  /**
+   * Compute a fast hash (djb2) of a string.
+   * Not cryptographic — used only for change detection.
+   * @param {string} str
+   * @returns {string} hex hash
+   */
+  function djb2Hash(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash + str.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+  }
+
+  /**
+   * Compute a digest string from an array of interactive elements.
+   * The digest captures role/tag, name/text, and visibility so that
+   * any meaningful UI change produces a different digest.
+   * @param {Array} elements - interactiveElements from extractPrunedDom
+   * @returns {string} digest like "djb2:<hex>"
+   */
+  function computeInteractablesDigest(elements) {
+    if (!elements || elements.length === 0) return 'djb2:empty';
+    const canonical = elements.map(el => {
+      const tag = (el.tag || '').toLowerCase();
+      const text = (el.text || '').trim().slice(0, 40);
+      const role = el.attributes?.role || '';
+      const ariaLabel = el.attributes?.['aria-label'] || '';
+      const name = el.attributes?.name || '';
+      return `${tag}|${role}|${name}|${ariaLabel}|${text}`;
+    }).join('\n');
+    return 'djb2:' + djb2Hash(canonical);
+  }
+
+  // =============================================================================
+  // Element Signature for Staleness Detection
+  // =============================================================================
+
+  /**
+   * Build a lightweight signature for an interactive element.
+   * Used to verify that a resolved element is still the "same" element
+   * and hasn't been replaced by a different one at the same CSS path.
+   * @param {Element} element - DOM element
+   * @returns {Object} signature { tag, role, name, ariaLabel, type, text }
+   */
+  function buildElementSignature(element) {
+    return {
+      tag: element.tagName,
+      role: element.getAttribute('role') || '',
+      name: element.getAttribute('name') || '',
+      ariaLabel: element.getAttribute('aria-label') || '',
+      type: element.getAttribute('type') || '',
+      text: (element.textContent || '').trim().slice(0, 60)
+    };
+  }
+
+  /**
+   * Check whether a resolved element matches the expected signature.
+   * Returns true if it looks like the same element.
+   * @param {Element} element - resolved DOM element
+   * @param {Object} signature - expected signature
+   * @returns {boolean}
+   */
+  function signatureMatches(element, signature) {
+    if (!element || !signature) return false;
+    // Tag must match exactly
+    if (element.tagName !== signature.tag) return false;
+    // Role must match if the original had one
+    if (signature.role && (element.getAttribute('role') || '') !== signature.role) return false;
+    // Name must match if the original had one
+    if (signature.name && (element.getAttribute('name') || '') !== signature.name) return false;
+    return true;
+  }
+
   // Default threshold for viewport filtering (pixels from viewport)
   const DEFAULT_VIEWPORT_THRESHOLD = 1000;
 
@@ -443,6 +521,7 @@
           top: Math.round(rect.top),
           left: Math.round(rect.left),
         },
+        signature: buildElementSignature(element),
       });
 
       labelCounter.value++;
@@ -547,11 +626,15 @@
       documentWidth: document.documentElement.scrollWidth,
     };
 
+    // Compute digest for UI change detection
+    const digest = computeInteractablesDigest(interactiveElements);
+
     return {
       ...metadata,
       tree,
       interactiveElements,
       viewport,
+      digest,
       extractedAt: new Date().toISOString(),
       stats: {
         interactiveCount: interactiveElements.length,
@@ -561,66 +644,254 @@
   }
 
   /**
-   * Find a specific interactive element by its label
+   * Find a specific interactive element by its label, with signature verification.
+   * Returns { element, status } where status is 'ok', 'stale', or 'not_found'.
+   * On 'stale', attempts reacquisition by signature match.
    * @param {number} label - The label index of the element
    * @param {Array} interactiveElements - Array of interactive elements from extraction
-   * @returns {Element|null} - The DOM element or null if not found
+   * @returns {{ element: Element|null, status: string, reacquiredLabel?: number }}
    */
   function findElementByLabel(label, interactiveElements) {
     const info = interactiveElements.find((el) => el.label === label);
     if (!info) {
-      return null;
+      return { element: null, status: 'not_found' };
     }
 
+    let element = null;
     try {
-      return document.querySelector(info.selector);
+      element = document.querySelector(info.selector);
     } catch (e) {
       console.error('Failed to find element by selector:', info.selector, e);
-      return null;
     }
+
+    if (!element) {
+      // Element gone — attempt reacquisition by signature
+      if (info.signature) {
+        const reacquired = attemptReacquire(info.signature, interactiveElements);
+        if (reacquired) {
+          return { element: reacquired.element, status: 'reacquired', reacquiredLabel: reacquired.label };
+        }
+      }
+      return { element: null, status: 'not_found' };
+    }
+
+    // Verify signature
+    if (info.signature && !signatureMatches(element, info.signature)) {
+      // Selector resolved to a DIFFERENT element — this is stale
+      console.warn('[ContentScript] Stale element at label', label, '— signature mismatch');
+      const reacquired = attemptReacquire(info.signature, interactiveElements);
+      if (reacquired) {
+        return { element: reacquired.element, status: 'reacquired', reacquiredLabel: reacquired.label };
+      }
+      return { element: null, status: 'stale' };
+    }
+
+    return { element, status: 'ok' };
   }
 
   /**
-   * Execute an action on an element by label
+   * Attempt to find an element matching a signature anywhere in the current DOM.
+   * Used for reacquisition when the original selector fails or resolves wrong.
+   * @param {Object} signature - Expected element signature
+   * @param {Array} interactiveElements - Current interactive elements list
+   * @returns {{ element: Element, label: number }|null}
+   */
+  function attemptReacquire(signature, interactiveElements) {
+    for (const info of interactiveElements) {
+      try {
+        const el = document.querySelector(info.selector);
+        if (el && signatureMatches(el, signature)) {
+          // Check text similarity (fuzzy — first 30 chars)
+          const elText = (el.textContent || '').trim().slice(0, 30);
+          const sigText = (signature.text || '').slice(0, 30);
+          if (!sigText || elText.includes(sigText) || sigText.includes(elText)) {
+            console.log('[ContentScript] Reacquired element at label', info.label);
+            return { element: el, label: info.label };
+          }
+        }
+      } catch (e) {
+        // Skip invalid selectors
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Capture a lightweight before/after state snapshot for diff computation.
+   * @returns {Object} snapshot { url, title, digest, scrollY }
+   */
+  function captureStateSnapshot() {
+    const digest = lastExtraction
+      ? computeInteractablesDigest(lastExtraction.interactiveElements)
+      : 'djb2:no_extraction';
+    return {
+      url: window.location.href,
+      title: document.title,
+      digest,
+      scrollY: window.scrollY,
+    };
+  }
+
+  /**
+   * Compute diff between two state snapshots.
+   * @param {Object} before - snapshot before action
+   * @param {Object} after - snapshot after action
+   * @returns {Object} diff flags
+   */
+  function computeStateDiff(before, after) {
+    return {
+      urlChanged: before.url !== after.url,
+      titleChanged: before.title !== after.title,
+      uiChanged: before.digest !== after.digest,
+      scrollChanged: before.scrollY !== after.scrollY,
+    };
+  }
+
+  /**
+   * Detect visible toasts/alerts (role=alert, role=status, common class patterns).
+   * @returns {string[]} array of toast text strings
+   */
+  function detectToasts() {
+    const toasts = [];
+    // ARIA roles
+    const alertEls = document.querySelectorAll('[role="alert"], [role="status"]');
+    alertEls.forEach(el => {
+      if (el instanceof HTMLElement) {
+        const style = window.getComputedStyle(el);
+        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+          const text = (el.textContent || '').trim().slice(0, 200);
+          if (text) toasts.push(text);
+        }
+      }
+    });
+    // Common class patterns
+    const classPatterns = document.querySelectorAll(
+      '.toast, .snackbar, .notification, [class*="toast"], [class*="snackbar"], [class*="Toastify"]'
+    );
+    classPatterns.forEach(el => {
+      if (el instanceof HTMLElement) {
+        const style = window.getComputedStyle(el);
+        if (style.display !== 'none' && style.visibility !== 'hidden') {
+          const text = (el.textContent || '').trim().slice(0, 200);
+          if (text && !toasts.includes(text)) toasts.push(text);
+        }
+      }
+    });
+    return toasts;
+  }
+
+  /**
+   * Detect if a modal/dialog is likely open.
+   * @returns {{ isModalLikelyOpen: boolean, modalSummary: Object|null }}
+   */
+  function detectModal() {
+    // Check for dialog elements
+    const dialogs = document.querySelectorAll(
+      'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+    );
+    for (const el of dialogs) {
+      if (el instanceof HTMLElement) {
+        const style = window.getComputedStyle(el);
+        if (style.display !== 'none' && style.visibility !== 'hidden') {
+          // Found a visible modal
+          const title = el.querySelector('h1, h2, h3, [class*="title"], [class*="header"]');
+          const closeBtn = el.querySelector(
+            'button[aria-label*="close" i], button[aria-label*="dismiss" i], button[class*="close" i], button:last-of-type'
+          );
+          return {
+            isModalLikelyOpen: true,
+            modalSummary: {
+              title: title ? (title.textContent || '').trim().slice(0, 100) : null,
+              hasCloseButton: !!closeBtn,
+              closeButtonText: closeBtn ? (closeBtn.textContent || '').trim().slice(0, 40) : null,
+            }
+          };
+        }
+      }
+    }
+    // Heuristic: large fixed/absolute overlay covering most of viewport
+    const allFixed = document.querySelectorAll('*');
+    for (const el of allFixed) {
+      if (!(el instanceof HTMLElement)) continue;
+      const style = window.getComputedStyle(el);
+      if ((style.position === 'fixed' || style.position === 'absolute') &&
+          style.display !== 'none' && style.visibility !== 'hidden') {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > window.innerWidth * 0.5 && rect.height > window.innerHeight * 0.5 &&
+            parseFloat(style.zIndex) > 100) {
+          return {
+            isModalLikelyOpen: true,
+            modalSummary: { title: null, hasCloseButton: false, closeButtonText: null }
+          };
+        }
+      }
+    }
+    return { isModalLikelyOpen: false, modalSummary: null };
+  }
+
+  /**
+   * Execute an action on an element by label.
+   * Returns structured result with before/after diff and toast/modal signals.
    * @param {string} action - The action to perform (click, type, scroll)
    * @param {number} label - The label index of the target element
    * @param {any} value - Optional value for the action (e.g., text to type)
    * @param {Array} interactiveElements - Array of interactive elements
-   * @returns {Object} - Result of the action
+   * @returns {Object} - Result of the action including diff
    */
   function executeAction(action, label, value, interactiveElements) {
-    const element = findElementByLabel(label, interactiveElements);
+    // Capture before-state
+    const beforeState = captureStateSnapshot();
+    const beforeToasts = detectToasts();
 
-    if (!element) {
+    const found = findElementByLabel(label, interactiveElements);
+
+    if (found.status === 'not_found' || found.status === 'stale') {
       return {
         success: false,
-        error: `Element with label [${label}] not found`,
+        error: found.status === 'stale'
+          ? `ELEMENT_STALE: Element [${label}] selector resolved to a different element`
+          : `Element with label [${label}] not found`,
+        elementStatus: found.status,
       };
     }
 
+    const element = found.element;
+    const reacquiredInfo = found.status === 'reacquired'
+      ? { reacquiredTarget: true, newLabel: found.reacquiredLabel }
+      : {};
+
     try {
+      let actionResult;
       switch (action) {
         case 'click':
           element.click();
-          return { success: true, action: 'click', label };
+          actionResult = { success: true, action: 'click', label };
+          break;
 
         case 'type':
           if (
             element.tagName === 'INPUT' ||
-            element.tagName === 'TEXTAREA' ||
-            element.isContentEditable
+            element.tagName === 'TEXTAREA'
           ) {
             element.focus();
             element.value = value;
             element.dispatchEvent(new Event('input', { bubbles: true }));
             element.dispatchEvent(new Event('change', { bubbles: true }));
-            return { success: true, action: 'type', label, value };
+            actionResult = { success: true, action: 'type', label, value };
+          } else if (element.isContentEditable) {
+            element.focus();
+            element.textContent = value;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            actionResult = { success: true, action: 'type', label, value };
+          } else {
+            return { success: false, error: 'Element is not typeable' };
           }
-          return { success: false, error: 'Element is not typeable' };
+          break;
 
         case 'focus':
           element.focus();
-          return { success: true, action: 'focus', label };
+          actionResult = { success: true, action: 'focus', label };
+          break;
 
         case 'hover':
           element.dispatchEvent(
@@ -629,15 +900,36 @@
           element.dispatchEvent(
             new MouseEvent('mouseover', { bubbles: true })
           );
-          return { success: true, action: 'hover', label };
+          actionResult = { success: true, action: 'hover', label };
+          break;
 
         case 'scroll_to':
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          return { success: true, action: 'scroll_to', label };
+          actionResult = { success: true, action: 'scroll_to', label };
+          break;
 
         default:
           return { success: false, error: `Unknown action: ${action}` };
       }
+
+      // Capture after-state and compute diff
+      const afterState = captureStateSnapshot();
+      const diff = computeStateDiff(beforeState, afterState);
+      const afterToasts = detectToasts();
+      const newToasts = afterToasts.filter(t => !beforeToasts.includes(t));
+      const modal = detectModal();
+
+      return {
+        ...actionResult,
+        ...reacquiredInfo,
+        diff: {
+          ...diff,
+          newToasts,
+          modalOpened: modal.isModalLikelyOpen,
+        },
+        modal: modal.isModalLikelyOpen ? modal.modalSummary : undefined,
+      };
+
     } catch (e) {
       return { success: false, error: e.message };
     }

@@ -12,7 +12,8 @@
     "offscreen",
     "tabCapture",
     "scripting",
-    "tabs"
+    "tabs",
+    "debugger"
   ],
 
   "host_permissions": [
@@ -49,7 +50,14 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content-script.js"],
+      "js": [
+        "content-scripts/cs-constants.js",
+        "content-scripts/cs-site-rules.js",
+        "content-scripts/cs-digest.js",
+        "content-scripts/cs-dom-extractor.js",
+        "content-scripts/cs-action-executor.js",
+        "content-scripts/cs-message-handler.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }

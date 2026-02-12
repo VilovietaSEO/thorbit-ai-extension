@@ -2,12 +2,12 @@
  * Automation Engine - Core State Machine Orchestrator
  *
  * Implements the observe-plan-act loop for autonomous browser automation.
- * Ties together all existing primitives:
- * - extractPrunedDom() from content-script.js
- * - executeAction() from content-script.js
- * - MessageRouter from service-worker.js
- * - persistState()/getState() from service-worker.js
- * - AgentPromptAssembler from prompts/agent-assembler.js
+ * Uses the BrowserProviderManager to abstract DOM vs CDP interaction.
+ *
+ * Providers:
+ * - DOMProvider (Day 1): content-script-based extraction and actions
+ * - CDPAXProvider (Day 2): CDP-based AX tree scan and Input dispatch
+ * - Auto-fallback: CDP → DOM on attach failure or errors
  *
  * State Machine Phases:
  * - idle: No active automation
@@ -24,6 +24,7 @@
  */
 
 import { AgentPromptAssembler } from '../prompts/agent-assembler.js';
+import { getBrowserProviderManager } from './browser/browser-provider-manager.js';
 
 // =============================================================================
 // Constants
@@ -90,6 +91,7 @@ class AutomationEngine {
       lastUpdatedAt: null
     };
     this.promptAssembler = new AgentPromptAssembler();
+    this.providerManager = getBrowserProviderManager();
     this._initialized = false;
   }
 
@@ -413,7 +415,8 @@ class AutomationEngine {
   // ===========================================================================
 
   /**
-   * Observe the current page state
+   * Observe the current page state via the BrowserProviderManager.
+   * Uses CDPAXProvider when available, falls back to DOMProvider.
    * @returns {Promise<Object>} Observation result with domState and optional screenshot
    */
   async observe() {
@@ -425,50 +428,59 @@ class AutomationEngine {
       });
 
       if (!tab || !tab.id) {
-        return {
-          success: false,
-          error: 'No active tab found'
-        };
+        return { success: false, error: 'No active tab found' };
       }
 
-      // Check if tab URL is valid for content script
+      // Check if tab URL is valid
       if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-        return {
-          success: false,
-          error: 'Cannot interact with this page type'
-        };
+        return { success: false, error: 'Cannot interact with this page type' };
       }
 
-      // Extract DOM from content script
-      let domResponse;
+      // Use provider manager to get interactables (handles CDP/DOM selection + fallback)
+      let interactablesResult;
       try {
-        domResponse = await chrome.tabs.sendMessage(tab.id, {
-          type: 'EXTRACT_DOM',
-          viewportThreshold: 1000
-        });
+        interactablesResult = await this.providerManager.getInteractables(tab.id);
       } catch (error) {
-        // Content script might not be injected
         return {
           success: false,
-          error: 'Content script not available - try refreshing the page'
+          error: `Page scan failed: ${error.message}`
         };
       }
 
-      if (!domResponse || !domResponse.success) {
-        return {
-          success: false,
-          error: domResponse?.error || 'DOM extraction failed',
-          blocked: domResponse?.blocked,
-          reason: domResponse?.reason
+      // Get page state (url, title, digest, modal, toasts)
+      let pageState;
+      try {
+        pageState = await this.providerManager.getState(tab.id);
+      } catch (error) {
+        // If state fetch fails, build minimal state from tab info
+        pageState = {
+          url: tab.url,
+          title: tab.title,
+          digest: interactablesResult.digest,
+          modal: { isModalLikelyOpen: false, modalSummary: null },
+          toasts: [],
+          provider: interactablesResult.provider,
         };
       }
 
-      const domState = domResponse.data;
+      // Build domState (backward-compatible shape)
+      const domState = {
+        url: pageState.url || tab.url,
+        title: pageState.title || tab.title,
+        interactiveElements: interactablesResult.elements || [],
+        digest: interactablesResult.digest,
+        modal: pageState.modal,
+        toasts: pageState.toasts || [],
+        viewport: pageState.viewport,
+        provider: interactablesResult.provider,
+        stats: interactablesResult.stats,
+        frameSummary: interactablesResult.frameSummary,
+      };
 
-      // Calculate confidence based on interactive element count and visibility
+      // Calculate confidence
       const confidence = this.calculateDomConfidence(domState);
 
-      // Capture screenshot if DOM confidence is low
+      // Capture screenshot if confidence is low
       let screenshot = null;
       if (confidence < DOM_CONFIDENCE_THRESHOLD) {
         try {
@@ -485,20 +497,14 @@ class AutomationEngine {
       return {
         success: true,
         tab,
-        domState: {
-          ...domState,
-          confidence
-        },
+        domState: { ...domState, confidence },
         screenshot,
-        siteContext: domResponse.siteContext
+        siteContext: { hostname: new URL(domState.url || tab.url).hostname },
       };
 
     } catch (error) {
       console.error('[AutomationEngine] Observe error:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
@@ -572,23 +578,36 @@ class AutomationEngine {
    */
   buildUserMessage(observation) {
     const parts = [];
+    const ds = observation.domState || {};
 
-    // Page info
+    // Build modal/toast info
+    const modalLine = ds.modal?.isModalLikelyOpen
+      ? `Modal: OPEN${ds.modal.modalSummary?.title ? ` — "${ds.modal.modalSummary.title}"` : ''}`
+      : 'Modal: none';
+    const toastsLine = (ds.toasts && ds.toasts.length > 0)
+      ? `Toasts: ${ds.toasts.join('; ')}`
+      : 'Toasts: none';
+
+    // Page info with Day 2 signals
     parts.push({
       type: 'text',
       text: `## Current Page
 
-URL: ${observation.domState?.url || 'Unknown'}
-Title: ${observation.domState?.title || 'Unknown'}
+URL: ${ds.url || 'Unknown'}
+Title: ${ds.title || 'Unknown'}
 Step: ${this.state.step}
+Provider: ${ds.provider || 'unknown'}
+Digest: ${ds.digest || 'N/A'}
+${modalLine}
+${toastsLine}
 
 ## Interactive Elements
 
-${this.formatInteractiveElements(observation.domState?.interactiveElements || [])}
+${this.formatInteractiveElements(ds.interactiveElements || [])}
 
 ## Viewport
 
-${JSON.stringify(observation.domState?.viewport || {}, null, 2)}
+${JSON.stringify(ds.viewport || {}, null, 2)}
 
 What actions should I take to achieve the goal?`
     });
@@ -707,227 +726,54 @@ What actions should I take to achieve the goal?`
   // ===========================================================================
 
   /**
-   * Execute a single action
+   * Execute a single action via the BrowserProviderManager.
+   * All actions now go through the provider abstraction, which handles
+   * CDP vs DOM selection and automatic fallback.
    * @param {Object} action - Action to execute
-   * @returns {Promise<Object>} Execution result
+   * @returns {Promise<Object>} Execution result with diff
    */
   async act(action) {
     if (!action || !action.type) {
       return { success: false, error: 'Invalid action' };
     }
 
-    console.log('[AutomationEngine] Executing action:', action.type);
+    // Non-action types
+    if (action.type === 'approval_required') {
+      return { success: false, error: 'Approval required for action' };
+    }
+    if (action.type === 'stuck') {
+      return { success: false, error: action.reason || 'Agent is stuck' };
+    }
+
+    console.log('[AutomationEngine] Executing action via provider:', action.type);
 
     try {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true
-      });
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.id) return { success: false, error: 'No active tab' };
 
-      if (!tab || !tab.id) {
-        return { success: false, error: 'No active tab' };
+      // Special handling for wait_for conditions (Day 2 waiters)
+      if (action.type === 'wait_for') {
+        return await this.providerManager.waitFor(tab.id, {
+          type: action.condition || 'ui_changed',
+          baselineDigest: action.baselineDigest,
+          roleContains: action.roleContains,
+          nameContains: action.nameContains,
+          textContains: action.textContains,
+        }, action.timeoutMs);
       }
 
-      switch (action.type) {
-        case 'click':
-          return await this.executeClick(tab.id, action);
+      // All other actions go through the provider manager
+      const result = await this.providerManager.act(tab.id, action);
 
-        case 'type':
-          return await this.executeType(tab.id, action);
-
-        case 'scroll':
-          return await this.executeScroll(tab.id, action);
-
-        case 'hover':
-          return await this.executeHover(tab.id, action);
-
-        case 'focus':
-          return await this.executeFocus(tab.id, action);
-
-        case 'navigate':
-          return await this.executeNavigate(tab.id, action);
-
-        case 'back':
-          return await this.executeBack(tab.id);
-
-        case 'refresh':
-          return await this.executeRefresh(tab.id);
-
-        case 'wait':
-          return await this.executeWait(action);
-
-        case 'click_coords':
-          return await this.executeClickCoords(tab.id, action);
-
-        case 'approval_required':
-          // This is a signal, not an action - should have been caught earlier
-          return { success: false, error: 'Approval required for action' };
-
-        case 'stuck':
-          // Not an action, just a status
-          return { success: false, error: action.reason || 'Agent is stuck' };
-
-        default:
-          return { success: false, error: `Unknown action type: ${action.type}` };
+      // Log diff for diagnostics
+      if (result.diff) {
+        console.log('[AutomationEngine] Action diff:', JSON.stringify(result.diff));
       }
+
+      return result;
 
     } catch (error) {
       console.error('[AutomationEngine] Action execution error:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Execute click action via content script
-   */
-  async executeClick(tabId, action) {
-    if (action.label === undefined && action.label !== 0) {
-      return { success: false, error: 'Click action requires label' };
-    }
-
-    return chrome.tabs.sendMessage(tabId, {
-      type: 'EXECUTE_ACTION',
-      action: 'click',
-      label: action.label
-    });
-  }
-
-  /**
-   * Execute type action via content script
-   */
-  async executeType(tabId, action) {
-    if (action.label === undefined || !action.value) {
-      return { success: false, error: 'Type action requires label and value' };
-    }
-
-    return chrome.tabs.sendMessage(tabId, {
-      type: 'EXECUTE_ACTION',
-      action: 'type',
-      label: action.label,
-      value: action.value
-    });
-  }
-
-  /**
-   * Execute scroll action via content script
-   */
-  async executeScroll(tabId, action) {
-    return chrome.tabs.sendMessage(tabId, {
-      type: 'SCROLL_PAGE',
-      direction: action.direction || 'down',
-      amount: action.amount
-    });
-  }
-
-  /**
-   * Execute hover action via content script
-   */
-  async executeHover(tabId, action) {
-    if (action.label === undefined) {
-      return { success: false, error: 'Hover action requires label' };
-    }
-
-    return chrome.tabs.sendMessage(tabId, {
-      type: 'EXECUTE_ACTION',
-      action: 'hover',
-      label: action.label
-    });
-  }
-
-  /**
-   * Execute focus action via content script
-   */
-  async executeFocus(tabId, action) {
-    if (action.label === undefined) {
-      return { success: false, error: 'Focus action requires label' };
-    }
-
-    return chrome.tabs.sendMessage(tabId, {
-      type: 'EXECUTE_ACTION',
-      action: 'focus',
-      label: action.label
-    });
-  }
-
-  /**
-   * Execute navigation to URL
-   */
-  async executeNavigate(tabId, action) {
-    if (!action.url) {
-      return { success: false, error: 'Navigate action requires url' };
-    }
-
-    try {
-      await chrome.tabs.update(tabId, { url: action.url });
-      // Wait for navigation to start
-      await this.delay(1000);
-      return { success: true, action: 'navigate', url: action.url };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Execute browser back
-   */
-  async executeBack(tabId) {
-    try {
-      await chrome.tabs.goBack(tabId);
-      await this.delay(500);
-      return { success: true, action: 'back' };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Execute page refresh
-   */
-  async executeRefresh(tabId) {
-    try {
-      await chrome.tabs.reload(tabId);
-      await this.delay(1000);
-      return { success: true, action: 'refresh' };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Execute wait action
-   */
-  async executeWait(action) {
-    const ms = action.ms || 1000;
-    await this.delay(ms);
-    return { success: true, action: 'wait', ms };
-  }
-
-  /**
-   * Execute click at specific coordinates (fallback)
-   */
-  async executeClickCoords(tabId, action) {
-    if (action.x === undefined || action.y === undefined) {
-      return { success: false, error: 'Click coords requires x and y' };
-    }
-
-    // Use Chrome debugger API for coordinate clicks
-    // This is a fallback when label-based click isn't available
-    try {
-      // For now, inject a click event - full implementation would use debugger
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (x, y) => {
-          const element = document.elementFromPoint(x, y);
-          if (element && element instanceof HTMLElement) {
-            element.click();
-            return { success: true };
-          }
-          return { success: false, error: 'No element at coordinates' };
-        },
-        args: [action.x, action.y]
-      });
-      return { success: true, action: 'click_coords', x: action.x, y: action.y };
-    } catch (error) {
       return { success: false, error: error.message };
     }
   }
@@ -1141,6 +987,47 @@ What actions should I take to achieve the goal?`
    */
   getLoadedPromptModules() {
     return this.promptAssembler.getLoadedModules();
+  }
+
+  /**
+   * Get the provider status for a tab (for UI display).
+   * @param {number} tabId
+   * @returns {Object}
+   */
+  getProviderStatus(tabId) {
+    return this.providerManager.getCDPStatus(tabId);
+  }
+
+  /**
+   * Get performance metrics for a tab.
+   * @param {number} tabId
+   * @returns {Object}
+   */
+  getMetrics(tabId) {
+    return this.providerManager.getMetrics(tabId);
+  }
+
+  /**
+   * Set the preferred browser provider.
+   * @param {'auto'|'dom'|'cdp_ax'} preference
+   */
+  setProviderPreference(preference) {
+    this.providerManager.setPreference(preference);
+  }
+
+  /**
+   * Manually attach/detach CDP for a tab.
+   * @param {number} tabId
+   * @param {boolean} attach
+   * @returns {Promise<boolean>}
+   */
+  async toggleCDP(tabId, attach) {
+    if (attach) {
+      return this.providerManager.attachCDP(tabId);
+    } else {
+      await this.providerManager.detachCDP(tabId);
+      return true;
+    }
   }
 }
 

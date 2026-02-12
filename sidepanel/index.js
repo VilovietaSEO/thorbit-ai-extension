@@ -390,6 +390,11 @@ const render = () => {
     bindAutomationEvents();
   }
 
+  // Render devtools panel if available (defined in devtools-panel.js)
+  if (typeof renderDevtoolsPanel === 'function') {
+    renderDevtoolsPanel();
+  }
+
   // Scroll to bottom of chat
   scrollToBottom();
 };

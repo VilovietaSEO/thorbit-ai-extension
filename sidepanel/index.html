@@ -10,9 +10,13 @@
   <!-- Component Styles -->
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="automation-panel.css">
+  <link rel="stylesheet" href="devtools-panel.css">
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- Day 2: Developer Tools Panel (collapsible, rendered by devtools-panel.js) -->
+  <div id="devtools-panel"></div>
 
   <!-- Automation Panel (rendered by JS but modal needs to be in DOM) -->
   <div id="approval-modal" class="approval-modal modal-hidden">
@@ -34,6 +38,7 @@
     In production, bundle React with a build tool (webpack/vite/esbuild).
     For development, we use a simple vanilla JS approach that mimics React patterns.
   -->
+  <script src="devtools-panel.js"></script>
   <script type="module" src="index.js"></script>
 </body>
 </html>

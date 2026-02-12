@@ -11,6 +11,7 @@
  */
 
 import { getAutomationEngine, LOOP_ALARM_NAME } from './utils/automation-engine.js';
+import { getBrowserProviderManager } from './utils/browser/browser-provider-manager.js';
 
 // =============================================================================
 // Constants
@@ -340,7 +341,14 @@ async function ensureContentScriptLoaded(tabId) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
-        files: ['content-script.js']
+        files: [
+          'content-scripts/cs-constants.js',
+          'content-scripts/cs-site-rules.js',
+          'content-scripts/cs-digest.js',
+          'content-scripts/cs-dom-extractor.js',
+          'content-scripts/cs-action-executor.js',
+          'content-scripts/cs-message-handler.js'
+        ]
       });
       // Wait a moment for the script to initialize
       await new Promise(r => setTimeout(r, 100));
@@ -1144,6 +1152,113 @@ MessageRouter.register('GET_AUTOMATION_STATE', async () => {
     isActive: engine.isActive(),
     loadedModules: engine.getLoadedPromptModules()
   };
+});
+
+// =============================================================================
+// Browser Provider Message Handlers (Day 2)
+// =============================================================================
+
+// Handler: Get provider status (attached/detached, active provider, metrics)
+MessageRouter.register('GET_PROVIDER_STATUS', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const engine = getAutomationEngine();
+    const status = engine.getProviderStatus(tab.id);
+    const metrics = engine.getMetrics(tab.id);
+
+    return { success: true, status, metrics };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler: Set provider preference (auto/dom/cdp_ax)
+MessageRouter.register('SET_PROVIDER_PREFERENCE', async (message) => {
+  const engine = getAutomationEngine();
+  engine.setProviderPreference(message.preference);
+  return { success: true, preference: message.preference };
+});
+
+// Handler: Manually attach/detach CDP
+MessageRouter.register('TOGGLE_CDP', async (message) => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const engine = getAutomationEngine();
+    const result = await engine.toggleCDP(tab.id, message.attach);
+    return { success: result, attached: message.attach };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler: Scan interactables (direct — for UI display)
+MessageRouter.register('SCAN_INTERACTABLES', async (message) => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const mgr = getBrowserProviderManager();
+    const result = await mgr.getInteractables(tab.id, {
+      scope: message.scope || 'viewport',
+      maxElements: message.maxElements || 100,
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler: Get page state (modal, toasts, digest)
+MessageRouter.register('GET_PAGE_STATE', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const mgr = getBrowserProviderManager();
+    const state = await mgr.getState(tab.id);
+    return { success: true, ...state };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler: Wait for condition (UI change, element appears, spinner gone, etc.)
+MessageRouter.register('WAIT_FOR', async (message) => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const mgr = getBrowserProviderManager();
+    const result = await mgr.waitFor(tab.id, {
+      type: message.condition,
+      baselineDigest: message.baselineDigest,
+      roleContains: message.roleContains,
+      nameContains: message.nameContains,
+      textContains: message.textContains,
+    }, message.timeoutMs);
+
+    return { success: true, ...result };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handler: Get performance metrics
+MessageRouter.register('GET_METRICS', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return { success: false, error: 'No active tab' };
+
+    const mgr = getBrowserProviderManager();
+    const metrics = mgr.getMetrics(tab.id);
+    return { success: true, metrics };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
 
 // =============================================================================
