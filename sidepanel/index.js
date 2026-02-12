@@ -328,20 +328,31 @@ const escapeHtml = (text) => {
   return div.innerHTML;
 };
 
+// Render function - builds the complete UI
+// Note: renderAutomationPanel and bindAutomationEvents are defined later in the file
 const render = () => {
   const root = document.getElementById('root');
   if (!root) return;
+
+  // Build automation panel HTML if available (defined later in file)
+  const automationHtml = typeof renderAutomationPanel === 'function' ? renderAutomationPanel() : '';
 
   root.innerHTML = `
     <div class="app-container">
       ${renderHeader()}
       ${renderChatArea()}
+      ${automationHtml}
       ${renderInputArea()}
     </div>
   `;
 
   // Bind events
   bindEvents();
+
+  // Bind automation events if available (defined later in file)
+  if (typeof bindAutomationEvents === 'function') {
+    bindAutomationEvents();
+  }
 
   // Scroll to bottom of chat
   scrollToBottom();
@@ -429,3 +440,301 @@ const init = async () => {
 
 // Start the app
 init();
+
+// =============================================================================
+// AUTOMATION PANEL - Progress UI for AI Agent Automation
+// =============================================================================
+
+// Automation state
+const automationStore = createStore({
+  isActive: false,
+  isPaused: false,
+  goal: '',
+  steps: [], // { id, description, status: 'pending' | 'active' | 'completed' | 'failed', detail? }
+  currentStepId: 0,
+  pendingApproval: null, // { type, description }
+});
+
+// Render automation panel HTML
+const renderAutomationPanel = () => {
+  const { isActive, goal, steps } = automationStore.getState();
+
+  if (!isActive) {
+    return '';
+  }
+
+  const stepsHtml = steps.map(step => `
+    <div class="progress-step ${step.status}" id="step-${step.id}">
+      <div class="step-icon ${step.status}">${getStepIcon(step.status)}</div>
+      <div class="step-content">
+        <div class="step-title">${escapeHtml(step.description)}</div>
+        ${step.detail ? `<div class="step-detail">${escapeHtml(step.detail)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  return `
+    <div id="automation-panel" class="automation-panel">
+      <div class="automation-header">
+        <div class="automation-title">
+          <span class="automation-icon">🤖</span>
+          <h3>Agent Running</h3>
+        </div>
+        <div class="automation-controls">
+          <button id="pause-automation-btn" class="btn-icon" title="Pause">
+            <span class="icon-pause">⏸️</span>
+          </button>
+          <button id="stop-automation-btn" class="btn-icon btn-stop" title="Stop">
+            <span class="icon-stop">⏹️</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="automation-goal">
+        <label>Goal</label>
+        <p id="automation-goal-text">${escapeHtml(goal)}</p>
+      </div>
+
+      <div class="automation-progress">
+        <div id="progress-steps" class="progress-steps">
+          ${stepsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+// Get step icon based on status
+const getStepIcon = (status) => {
+  switch (status) {
+    case 'pending': return '⏱️';
+    case 'active': return '⚡';
+    case 'completed': return '✅';
+    case 'failed': return '❌';
+    default: return '•';
+  }
+};
+
+// Handle automation events from background script
+const handleAutomationEvent = (event, data) => {
+  console.log('Automation event:', event, data);
+
+  switch (event) {
+    case 'started':
+      automationStore.setState({
+        isActive: true,
+        isPaused: false,
+        goal: data.goal || 'Running automation...',
+        steps: [],
+        currentStepId: 0,
+      });
+      render();
+      break;
+
+    case 'step_started': {
+      const { steps, currentStepId } = automationStore.getState();
+      const newId = currentStepId + 1;
+      const newStep = {
+        id: newId,
+        description: data.step || data.description || 'Processing...',
+        status: 'active',
+        detail: data.detail || null,
+      };
+      automationStore.setState({
+        steps: [...steps, newStep],
+        currentStepId: newId,
+      });
+      render();
+      break;
+    }
+
+    case 'step_completed': {
+      const { steps } = automationStore.getState();
+      const stepId = data.stepId || automationStore.getState().currentStepId;
+      const updatedSteps = steps.map(step =>
+        step.id === stepId ? { ...step, status: 'completed' } : step
+      );
+      automationStore.setState({ steps: updatedSteps });
+      render();
+      break;
+    }
+
+    case 'step_failed': {
+      const { steps } = automationStore.getState();
+      const stepId = data.stepId || automationStore.getState().currentStepId;
+      const updatedSteps = steps.map(step =>
+        step.id === stepId
+          ? { ...step, status: 'failed', detail: data.error || 'Step failed' }
+          : step
+      );
+      automationStore.setState({ steps: updatedSteps });
+      render();
+      break;
+    }
+
+    case 'approval_required':
+      automationStore.setState({
+        pendingApproval: {
+          type: data.type || 'action',
+          description: data.description || 'An action requires your approval',
+        },
+      });
+      showApprovalModal(data);
+      break;
+
+    case 'paused':
+      automationStore.setState({ isPaused: true });
+      break;
+
+    case 'resumed':
+      automationStore.setState({ isPaused: false });
+      break;
+
+    case 'stopped':
+    case 'goal_complete':
+      automationStore.setState({
+        isActive: false,
+        isPaused: false,
+        pendingApproval: null,
+      });
+      hideApprovalModal();
+      render();
+      break;
+
+    case 'error':
+      console.error('Automation error:', data);
+      showAutomationError(data.error || 'An error occurred');
+      break;
+  }
+};
+
+// Show approval modal
+const showApprovalModal = (action) => {
+  const modal = document.getElementById('approval-modal');
+  const desc = document.getElementById('approval-action-desc');
+
+  if (modal && desc) {
+    desc.textContent = `The agent wants to: ${action.type || 'perform an action'} - ${action.description || 'No description provided'}`;
+    modal.classList.remove('modal-hidden');
+    bindApprovalModalEvents();
+  }
+};
+
+// Hide approval modal
+const hideApprovalModal = () => {
+  const modal = document.getElementById('approval-modal');
+  if (modal) {
+    modal.classList.add('modal-hidden');
+  }
+  automationStore.setState({ pendingApproval: null });
+};
+
+// Bind approval modal button events
+const bindApprovalModalEvents = () => {
+  const approveBtn = document.getElementById('approve-action-btn');
+  const denyBtn = document.getElementById('deny-action-btn');
+  const overlay = document.querySelector('.modal-overlay');
+
+  if (approveBtn) {
+    approveBtn.onclick = async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'APPROVE_ACTION' });
+      } catch (e) {
+        console.error('Failed to send approval:', e);
+      }
+      hideApprovalModal();
+    };
+  }
+
+  if (denyBtn) {
+    denyBtn.onclick = async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'REJECT_ACTION' });
+      } catch (e) {
+        console.error('Failed to send rejection:', e);
+      }
+      hideApprovalModal();
+    };
+  }
+
+  // Close on overlay click
+  if (overlay) {
+    overlay.onclick = async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'REJECT_ACTION' });
+      } catch (e) {
+        console.error('Failed to send rejection:', e);
+      }
+      hideApprovalModal();
+    };
+  }
+};
+
+// Show automation error
+const showAutomationError = (message) => {
+  // Add error step to show in the UI
+  const { steps, currentStepId } = automationStore.getState();
+  const newId = currentStepId + 1;
+  automationStore.setState({
+    steps: [...steps, {
+      id: newId,
+      description: 'Error occurred',
+      status: 'failed',
+      detail: message,
+    }],
+    currentStepId: newId,
+  });
+  render();
+};
+
+// Bind automation panel button events
+const bindAutomationEvents = () => {
+  const pauseBtn = document.getElementById('pause-automation-btn');
+  const stopBtn = document.getElementById('stop-automation-btn');
+
+  if (pauseBtn) {
+    pauseBtn.onclick = async () => {
+      const { isPaused } = automationStore.getState();
+      try {
+        if (isPaused) {
+          await chrome.runtime.sendMessage({ type: 'RESUME_AUTOMATION' });
+        } else {
+          await chrome.runtime.sendMessage({ type: 'PAUSE_AUTOMATION' });
+        }
+      } catch (e) {
+        console.error('Failed to pause/resume automation:', e);
+      }
+    };
+  }
+
+  if (stopBtn) {
+    stopBtn.onclick = async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION' });
+      } catch (e) {
+        console.error('Failed to stop automation:', e);
+      }
+      automationStore.setState({
+        isActive: false,
+        isPaused: false,
+        pendingApproval: null,
+      });
+      hideApprovalModal();
+      render();
+    };
+  }
+};
+
+// Listen for automation events from background script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'AUTOMATION_EVENT') {
+    handleAutomationEvent(message.event, message.data || {});
+    sendResponse({ received: true });
+  }
+  return false; // Synchronous response
+});
+
+// Subscribe to automation state changes to trigger re-renders
+automationStore.subscribe(() => {
+  requestAnimationFrame(render);
+});

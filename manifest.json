@@ -9,7 +9,8 @@
     "storage",
     "sidePanel",
     "alarms",
-    "offscreen"
+    "offscreen",
+    "tabCapture"
   ],
 
   "host_permissions": [

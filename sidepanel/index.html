@@ -9,9 +9,25 @@
   <link rel="stylesheet" href="../styles/fonts.css">
   <!-- Component Styles -->
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="automation-panel.css">
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- Automation Panel (rendered by JS but modal needs to be in DOM) -->
+  <div id="approval-modal" class="approval-modal modal-hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <h3>Action Requires Approval</h3>
+      <div class="approval-details">
+        <p id="approval-action-desc"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="approve-action-btn" class="btn-primary">Approve</button>
+        <button id="deny-action-btn" class="btn-secondary">Deny</button>
+      </div>
+    </div>
+  </div>
 
   <!--
     Note: For Chrome extensions with CSP 'script-src self', we cannot use CDN React.

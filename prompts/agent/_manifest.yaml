@@ -1,0 +1,209 @@
+# Browser Agent Prompt Modules
+# Thin slices assembled based on context
+#
+# loadWhen conditions:
+#   - always: Module is always loaded
+#   - context.hasScreenshot == true: When screenshot is available
+#   - context.platform != null: When on a known platform
+#   - context.hasForm == true: When form elements detected
+
+version: "1.0"
+
+# ============================================
+# CORE (always loaded, priority 0)
+# ============================================
+
+core:
+  - name: identity
+    path: core/identity.md
+    loadWhen: always
+    priority: 0
+    tokens: ~150
+    description: Who the agent is
+
+  - name: output-format
+    path: core/output-format.md
+    loadWhen: always
+    priority: 0
+    tokens: ~200
+    description: JSON action array format
+
+# ============================================
+# BROWSER OPERATIONS (always loaded, priority 10)
+# ============================================
+
+operations:
+  - name: dom-interaction
+    path: operations/dom-interaction.md
+    loadWhen: always
+    priority: 10
+    tokens: ~250
+    description: Click, type, scroll, hover actions
+
+  - name: navigation
+    path: operations/navigation.md
+    loadWhen: always
+    priority: 10
+    tokens: ~150
+    description: Tab creation, URL navigation, waiting
+
+  - name: observation
+    path: operations/observation.md
+    loadWhen: always
+    priority: 10
+    tokens: ~200
+    description: DOM reading, element labeling system
+
+# ============================================
+# VISUAL (loaded when screenshot available)
+# ============================================
+
+visual:
+  - name: screenshot-analysis
+    path: visual/screenshot-analysis.md
+    loadWhen: context.hasScreenshot == true
+    priority: 15
+    tokens: ~300
+    description: How to interpret screenshots when DOM is insufficient
+
+# ============================================
+# PLATFORM-SPECIFIC (loaded by platform)
+# ============================================
+
+platforms:
+  - name: social-media
+    path: platforms/social-media.md
+    loadWhen: context.platform in ["facebook", "twitter", "linkedin", "instagram"]
+    priority: 20
+    tokens: ~350
+    description: Social media interaction patterns
+
+  - name: search-engines
+    path: platforms/search-engines.md
+    loadWhen: context.platform in ["google", "bing", "duckduckgo"]
+    priority: 20
+    tokens: ~200
+    description: Search engine navigation patterns
+
+  - name: ecommerce
+    path: platforms/ecommerce.md
+    loadWhen: context.platform in ["amazon", "shopify", "ebay"]
+    priority: 20
+    tokens: ~250
+    description: Shopping site patterns
+
+# ============================================
+# FORM HANDLING (loaded when forms detected)
+# ============================================
+
+forms:
+  - name: form-filling
+    path: forms/form-filling.md
+    loadWhen: context.hasForm == true
+    priority: 20
+    tokens: ~250
+    description: Form field detection and filling strategies
+
+# ============================================
+# SAFETY (always loaded, priority 25)
+# ============================================
+
+safety:
+  - name: approval-gates
+    path: safety/approval-gates.md
+    loadWhen: always
+    priority: 25
+    tokens: ~200
+    description: Dangerous action detection, approval requirements
+
+  - name: boundaries
+    path: safety/boundaries.md
+    loadWhen: always
+    priority: 25
+    tokens: ~150
+    description: What the agent should never do
+
+# ============================================
+# USER CONTEXT (injected from settings)
+# ============================================
+
+dynamic_content:
+  - name: user-system-prompt
+    tag: "<USER_INSTRUCTIONS>...</USER_INSTRUCTIONS>"
+    source: settings.systemPrompt
+    loadWhen: settings.systemPrompt != null
+    description: User's custom instructions from options page
+
+  - name: site-rules
+    tag: "<SITE_RULES>...</SITE_RULES>"
+    source: settings.siteRules
+    loadWhen: settings.siteRules != null
+    description: Allow/block URL patterns
+
+  - name: current-goal
+    tag: "<GOAL>...</GOAL>"
+    source: context.goal
+    loadWhen: always
+    description: The user's current goal
+
+  - name: action-history
+    tag: "<HISTORY>...</HISTORY>"
+    source: context.history
+    loadWhen: context.history.length > 0
+    description: Actions already taken this session
+
+# ============================================
+# ASSEMBLY ORDER
+# ============================================
+
+assembly_order:
+  1_core:
+    - core/identity.md
+    - core/output-format.md
+
+  2_operations:
+    - operations/dom-interaction.md
+    - operations/navigation.md
+    - operations/observation.md
+
+  3_visual:
+    - visual/screenshot-analysis.md  # if screenshot
+
+  4_platforms:
+    - platforms/social-media.md      # if social
+    - platforms/search-engines.md    # if search
+    - platforms/ecommerce.md         # if shopping
+
+  5_forms:
+    - forms/form-filling.md          # if forms detected
+
+  6_safety:
+    - safety/approval-gates.md
+    - safety/boundaries.md
+
+  7_dynamic:
+    - <USER_INSTRUCTIONS>
+    - <SITE_RULES>
+    - <GOAL>
+    - <HISTORY>
+
+# ============================================
+# TOKEN ESTIMATES
+# ============================================
+
+token_estimates:
+  base_always_loaded: ~1,300
+    # identity: 150
+    # output-format: 200
+    # dom-interaction: 250
+    # navigation: 150
+    # observation: 200
+    # approval-gates: 200
+    # boundaries: 150
+
+  conditional_max: ~1,100
+    # screenshot-analysis: 300
+    # social-media: 350
+    # search-engines: 200
+    # ecommerce: 250
+    # form-filling: 250

@@ -1,0 +1,528 @@
+/**
+ * Automation Panel Styles
+ *
+ * Progress UI for AI agent automation in the Chrome extension sidepanel.
+ * Uses Thorbit design tokens from tokens.css.
+ *
+ * Key Design Decisions:
+ * - Primary color: Terracotta (#C4704F) for active states
+ * - Secondary: Teal (#7FA9B3) for completed states
+ * - 44px minimum touch targets for accessibility
+ * - Border radius: 8px for panels, 6px for cards
+ */
+
+/* ==========================================================================
+   AUTOMATION PANEL - Main Container
+   ========================================================================== */
+
+.automation-panel {
+  background: var(--bg-secondary, #F5F1E8);
+  border-radius: var(--radius-lg, 12px);
+  padding: var(--space-4, 16px);
+  margin-top: var(--space-4, 16px);
+  border: 1px solid var(--border, #E0D8CC);
+  animation: slide-down var(--duration-normal, 250ms) var(--ease-out);
+}
+
+.automation-hidden {
+  display: none;
+}
+
+/* ==========================================================================
+   AUTOMATION HEADER - Title and Controls
+   ========================================================================== */
+
+.automation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4, 16px);
+}
+
+.automation-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+.automation-title h3 {
+  margin: 0;
+  font-size: var(--text-base, 16px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--text-primary, #2C2419);
+  letter-spacing: var(--tracking-tight, -0.02em);
+}
+
+.automation-icon {
+  font-size: var(--text-lg, 18px);
+  line-height: 1;
+}
+
+.automation-controls {
+  display: flex;
+  gap: var(--space-2, 8px);
+}
+
+.btn-icon {
+  width: var(--touch-target-min, 44px);
+  height: var(--touch-target-min, 44px);
+  border: none;
+  background: var(--background, #FDFBF7);
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-lg, 18px);
+  transition:
+    background-color var(--duration-fast, 150ms) var(--ease-out),
+    transform var(--duration-fast, 150ms) var(--ease-out);
+  color: var(--text-secondary, #6B5F53);
+}
+
+.btn-icon:hover {
+  background: var(--bg-hover, #F9F5ED);
+  transform: translateY(-2px);
+}
+
+.btn-icon:active {
+  transform: scale(0.97);
+}
+
+.btn-icon:focus-visible {
+  outline: 2px solid var(--primary, #C4704F);
+  outline-offset: 2px;
+}
+
+.btn-icon.btn-stop:hover {
+  background: var(--error-light, #FDF0EE);
+  color: var(--error, #C4695A);
+}
+
+/* ==========================================================================
+   AUTOMATION GOAL - Current Task Description
+   ========================================================================== */
+
+.automation-goal {
+  background: var(--background, #FDFBF7);
+  padding: var(--space-3, 12px);
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: var(--space-4, 16px);
+  border: 1px solid var(--border-light, #EDE7DC);
+}
+
+.automation-goal label {
+  display: block;
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--text-tertiary, #9B8F83);
+  margin-bottom: var(--space-1, 4px);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide, 0.01em);
+}
+
+.automation-goal p {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-weight-light, 300);
+  color: var(--text-primary, #2C2419);
+  line-height: var(--leading-relaxed, 1.625);
+}
+
+/* ==========================================================================
+   PROGRESS STEPS - Step-by-step Progress Indicator
+   ========================================================================== */
+
+.progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding: var(--space-3, 12px);
+  background: var(--background, #FDFBF7);
+  border-radius: var(--radius-md, 8px);
+  border-left: 3px solid transparent;
+  transition:
+    background-color var(--duration-fast, 150ms) var(--ease-out),
+    border-color var(--duration-fast, 150ms) var(--ease-out),
+    opacity var(--duration-fast, 150ms) var(--ease-out);
+}
+
+.progress-step.pending {
+  border-left-color: var(--border, #E0D8CC);
+}
+
+.progress-step.active {
+  border-left-color: var(--primary, #C4704F);
+  background: #FDF8F5;
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    border-left-color: var(--primary, #C4704F);
+  }
+  50% {
+    border-left-color: var(--primary-light, #D68966);
+  }
+}
+
+.progress-step.completed {
+  border-left-color: var(--success, #6B9B5A);
+  opacity: 0.7;
+}
+
+.progress-step.failed {
+  border-left-color: var(--error, #C4695A);
+  background: var(--error-light, #FDF0EE);
+}
+
+/* Step Icon */
+.step-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full, 9999px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm, 14px);
+  flex-shrink: 0;
+  transition:
+    background-color var(--duration-fast, 150ms) var(--ease-out),
+    color var(--duration-fast, 150ms) var(--ease-out);
+}
+
+.step-icon.pending {
+  background: var(--bg-tertiary, #EBE5DA);
+  color: var(--text-tertiary, #9B8F83);
+}
+
+.step-icon.active {
+  background: var(--primary, #C4704F);
+  color: white;
+  animation: brain-pulse 2s ease-in-out infinite;
+}
+
+.step-icon.completed {
+  background: var(--success, #6B9B5A);
+  color: white;
+}
+
+.step-icon.failed {
+  background: var(--error, #C4695A);
+  color: white;
+}
+
+/* Step Content */
+.step-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--text-primary, #2C2419);
+  margin-bottom: var(--space-1, 4px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-detail {
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-weight-light, 300);
+  color: var(--text-secondary, #6B5F53);
+  line-height: var(--leading-normal, 1.5);
+}
+
+/* ==========================================================================
+   APPROVAL MODAL - Action Approval Dialog
+   ========================================================================== */
+
+.approval-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-modal, 50);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4, 16px);
+}
+
+.modal-hidden {
+  display: none !important;
+}
+
+.modal-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(44, 36, 25, 0.5);
+  animation: fade-in var(--duration-fast, 150ms) var(--ease-out);
+}
+
+.modal-content {
+  position: relative;
+  background: var(--background, #FDFBF7);
+  padding: var(--space-6, 24px);
+  border-radius: var(--radius-xl, 16px);
+  max-width: 400px;
+  width: 100%;
+  box-shadow: var(--shadow-lg);
+  animation: scale-in var(--duration-normal, 250ms) var(--ease-out);
+}
+
+.modal-content h3 {
+  margin: 0 0 var(--space-4, 16px) 0;
+  font-size: var(--text-lg, 18px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--text-primary, #2C2419);
+  letter-spacing: var(--tracking-tight, -0.02em);
+}
+
+.approval-details {
+  margin-bottom: var(--space-5, 20px);
+  padding: var(--space-3, 12px);
+  background: var(--bg-secondary, #F5F1E8);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border, #E0D8CC);
+}
+
+.approval-details p {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-weight-light, 300);
+  color: var(--text-primary, #2C2419);
+  line-height: var(--leading-relaxed, 1.625);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--space-3, 12px);
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   BUTTONS - Primary and Secondary Actions
+   ========================================================================== */
+
+.btn-primary,
+.btn-secondary {
+  min-height: var(--touch-target-min, 44px);
+  padding: 0 var(--space-6, 24px);
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-weight-medium, 500);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast, 150ms) var(--ease-out),
+    transform var(--duration-fast, 150ms) var(--ease-out),
+    box-shadow var(--duration-fast, 150ms) var(--ease-out);
+}
+
+.btn-primary {
+  background: var(--primary, #C4704F);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--primary-dark, #A25A3F);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--primary-dark, #A25A3F);
+  outline-offset: 2px;
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary, #EBE5DA);
+  color: var(--text-primary, #2C2419);
+}
+
+.btn-secondary:hover {
+  background: var(--border, #E0D8CC);
+  transform: translateY(-2px);
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--primary, #C4704F);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   AUTOMATION STATUS BADGE - Optional status indicator
+   ========================================================================== */
+
+.automation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  background: var(--info-light, #EEF5F7);
+  border-radius: var(--radius-full, 9999px);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-weight-medium, 500);
+  color: var(--info, #7FA9B3);
+}
+
+.automation-status.running {
+  background: #FDF8F5;
+  color: var(--primary, #C4704F);
+}
+
+.automation-status.paused {
+  background: var(--warning-light, #FDF8EC);
+  color: var(--warning, #D4A55A);
+}
+
+.automation-status.completed {
+  background: var(--success-light, #EEF5EC);
+  color: var(--success, #6B9B5A);
+}
+
+.automation-status.error {
+  background: var(--error-light, #FDF0EE);
+  color: var(--error, #C4695A);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full, 9999px);
+  background: currentColor;
+}
+
+.status-dot.running {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* ==========================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+
+@media (max-width: 360px) {
+  .automation-panel {
+    padding: var(--space-3, 12px);
+    margin-top: var(--space-3, 12px);
+  }
+
+  .automation-header {
+    margin-bottom: var(--space-3, 12px);
+  }
+
+  .automation-goal {
+    padding: var(--space-2, 8px) var(--space-3, 12px);
+    margin-bottom: var(--space-3, 12px);
+  }
+
+  .progress-step {
+    padding: var(--space-2, 8px) var(--space-3, 12px);
+    gap: var(--space-2, 8px);
+  }
+
+  .step-icon {
+    width: 28px;
+    height: 28px;
+    font-size: var(--text-xs, 12px);
+  }
+
+  .modal-content {
+    padding: var(--space-4, 16px);
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   REDUCED MOTION SUPPORT
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .automation-panel,
+  .modal-overlay,
+  .modal-content {
+    animation: none;
+  }
+
+  .progress-step.active,
+  .step-icon.active,
+  .status-dot.running {
+    animation: none;
+  }
+
+  .btn-icon:hover,
+  .btn-primary:hover,
+  .btn-secondary:hover {
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   HIGH CONTRAST SUPPORT
+   ========================================================================== */
+
+@media (prefers-contrast: high) {
+  .automation-panel,
+  .automation-goal,
+  .progress-step,
+  .modal-content,
+  .approval-details {
+    border-width: 2px;
+    border-color: var(--text-primary, #2C2419);
+  }
+
+  .progress-step.active,
+  .progress-step.completed,
+  .progress-step.failed {
+    border-left-width: 4px;
+  }
+
+  .btn-primary:focus-visible,
+  .btn-secondary:focus-visible,
+  .btn-icon:focus-visible {
+    outline-width: 3px;
+  }
+}

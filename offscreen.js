@@ -26,6 +26,7 @@
 import { ProviderManager } from './utils/providers/provider-manager.js';
 import { AnthropicProvider } from './utils/providers/anthropic-provider.js';
 import { OpenRouterProvider } from './utils/providers/openrouter-provider.js';
+import { AgentPromptAssembler } from './prompts/agent-assembler.js';
 
 // =============================================================================
 // Configuration
@@ -47,6 +48,7 @@ const CONFIG = {
 // =============================================================================
 
 const providerManager = new ProviderManager();
+const agentPromptAssembler = new AgentPromptAssembler();
 
 /**
  * Initialize providers from stored API keys
@@ -239,6 +241,41 @@ ${dom}
 User Request: ${prompt}`
     }
   ];
+}
+
+/**
+ * Build user message from page observation for agent action planning
+ * @param {Object} observation - Page observation from content script
+ * @param {Object} observation.domState - DOM state with URL, title, interactive elements
+ * @param {boolean} observation.screenshot - Whether screenshot is available
+ * @returns {string} Formatted user message
+ */
+function buildPageStateMessage(observation) {
+  const { domState, screenshot } = observation;
+
+  let message = `Current page:\nURL: ${domState.url}\nTitle: ${domState.title}\n\n`;
+
+  // Add interactive elements
+  if (domState.interactiveElements?.length > 0) {
+    message += 'Interactive elements:\n';
+    for (const el of domState.interactiveElements.slice(0, 50)) {
+      const text = el.text || el.placeholder || el.value || '';
+      message += `[${el.label}] ${el.tag}`;
+      if (text) {
+        message += ` - "${text.slice(0, 50)}"`;
+      }
+      message += '\n';
+    }
+  }
+
+  // Note if screenshot available
+  if (screenshot) {
+    message += '\n[Screenshot attached for visual context]\n';
+  }
+
+  message += '\nWhat actions should I take next? Return JSON array only.';
+
+  return message;
 }
 
 // =============================================================================
@@ -442,6 +479,117 @@ Extract the data and return it as JSON.`;
       error: error.message,
       errorCode: error.statusCode,
       provider: providerManager.getActiveProviderName()
+    };
+  }
+}
+
+// =============================================================================
+// Agent Action Planning
+// =============================================================================
+
+/**
+ * Plan actions for browser automation agent
+ * Uses modular prompt system via AgentPromptAssembler
+ * @param {Object} message - Request message
+ * @param {string} message.goal - User's automation goal
+ * @param {Object} message.observation - Page observation (domState, screenshot)
+ * @param {Array} message.history - Action history
+ * @param {string} message.systemPrompt - Pre-assembled system prompt from AutomationEngine
+ * @returns {Promise<Object>} Planned actions
+ */
+async function planActions(message) {
+  try {
+    const { goal, observation, history, systemPrompt } = message;
+
+    // Validate required fields
+    if (!observation?.domState) {
+      return {
+        actions: [],
+        error: 'Missing page observation data'
+      };
+    }
+
+    // Get active provider
+    const activeProvider = providerManager.getActiveProvider();
+
+    if (!activeProvider) {
+      return {
+        actions: [],
+        error: 'No AI provider configured. Please set up authentication.',
+        needsAuth: true
+      };
+    }
+
+    // Build user message from observation
+    const userMessage = buildPageStateMessage(observation);
+
+    console.log('[Offscreen] Planning actions for goal:', goal);
+    console.log('[Offscreen] Provider:', providerManager.getActiveProviderName());
+
+    // Send to AI with structured output
+    const response = await providerManager.sendMessage([
+      { role: 'user', content: userMessage }
+    ], {
+      systemPrompt: systemPrompt,
+      maxTokens: 2000,
+      temperature: 0.3  // Deterministic for actions
+    });
+
+    console.log('[Offscreen] AI response for action planning:', {
+      provider: providerManager.getActiveProviderName(),
+      model: response.model,
+      usage: response.usage
+    });
+
+    // Parse JSON actions from response
+    const content = response.content || '';
+
+    // Extract JSON array from response (handle markdown code blocks)
+    let jsonContent = content;
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1].trim();
+    }
+
+    // Parse the actions
+    let actions;
+    try {
+      actions = JSON.parse(jsonContent);
+    } catch (parseError) {
+      console.error('[Offscreen] Failed to parse AI response as JSON:', content);
+      return {
+        actions: [],
+        error: 'AI returned invalid JSON response',
+        rawContent: content,
+        loadedModules: agentPromptAssembler.getLoadedModules()
+      };
+    }
+
+    // Validate actions array
+    if (!Array.isArray(actions)) {
+      console.error('[Offscreen] AI returned non-array response:', actions);
+      return {
+        actions: [],
+        error: 'AI returned non-array response',
+        rawContent: content,
+        loadedModules: agentPromptAssembler.getLoadedModules()
+      };
+    }
+
+    return {
+      actions,
+      usage: response.usage,
+      model: response.model,
+      provider: providerManager.getActiveProviderName(),
+      loadedModules: agentPromptAssembler.getLoadedModules()
+    };
+
+  } catch (error) {
+    console.error('[Offscreen] PLAN_ACTIONS error:', error);
+    return {
+      actions: [],
+      error: error.message || 'Failed to plan actions',
+      loadedModules: agentPromptAssembler.getLoadedModules()
     };
   }
 }
@@ -734,6 +882,10 @@ async function handleMessage(message) {
     case 'REINITIALIZE_PROVIDERS':
       // Reinitialize providers from storage
       return await initializeProviders();
+
+    case 'PLAN_ACTIONS':
+      // Agent automation action planning
+      return await planActions(message);
 
     case 'PING':
       return {

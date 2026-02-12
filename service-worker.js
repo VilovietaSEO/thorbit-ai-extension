@@ -7,7 +7,10 @@
  * - State persistence to chrome.storage.session
  * - Side panel management via action.onClicked
  * - Offscreen document coordination
+ * - Automation engine orchestration (observe-plan-act loop)
  */
+
+import { getAutomationEngine, LOOP_ALARM_NAME } from './utils/automation-engine.js';
 
 // =============================================================================
 // Constants
@@ -365,6 +368,69 @@ MessageRouter.register('PING', async () => {
 });
 
 // =============================================================================
+// Automation Engine Message Handlers
+// =============================================================================
+
+// Handler: Start automation with a goal
+MessageRouter.register('START_AUTOMATION', async (message) => {
+  console.log('[Handler] START_AUTOMATION:', message.goal);
+  const engine = getAutomationEngine();
+  await engine.start(message.goal);
+  return { success: true };
+});
+
+// Handler: Pause running automation
+MessageRouter.register('PAUSE_AUTOMATION', async () => {
+  console.log('[Handler] PAUSE_AUTOMATION');
+  const engine = getAutomationEngine();
+  await engine.pause();
+  return { success: true };
+});
+
+// Handler: Resume paused automation
+MessageRouter.register('RESUME_AUTOMATION', async () => {
+  console.log('[Handler] RESUME_AUTOMATION');
+  const engine = getAutomationEngine();
+  await engine.resume();
+  return { success: true };
+});
+
+// Handler: Stop automation completely
+MessageRouter.register('STOP_AUTOMATION', async () => {
+  console.log('[Handler] STOP_AUTOMATION');
+  const engine = getAutomationEngine();
+  await engine.stop();
+  return { success: true };
+});
+
+// Handler: Approve pending action
+MessageRouter.register('APPROVE_ACTION', async () => {
+  console.log('[Handler] APPROVE_ACTION');
+  const engine = getAutomationEngine();
+  await engine.approveAndContinue();
+  return { success: true };
+});
+
+// Handler: Reject pending action
+MessageRouter.register('REJECT_ACTION', async (message) => {
+  console.log('[Handler] REJECT_ACTION:', message.reason);
+  const engine = getAutomationEngine();
+  await engine.rejectAndContinue(message.reason);
+  return { success: true };
+});
+
+// Handler: Get automation state
+MessageRouter.register('GET_AUTOMATION_STATE', async () => {
+  const engine = getAutomationEngine();
+  return {
+    success: true,
+    state: engine.getState(),
+    isActive: engine.isActive(),
+    loadedModules: engine.getLoadedPromptModules()
+  };
+});
+
+// =============================================================================
 // Event Listeners
 // =============================================================================
 
@@ -373,6 +439,20 @@ chrome.runtime.onStartup.addListener(async () => {
   console.log('[ServiceWorker] onStartup - Browser started');
   await initializeKeepAlive();
   await updateTaskBadge();
+
+  // Restore automation engine state and resume if needed
+  const engine = getAutomationEngine();
+  const restored = await engine.restoreState();
+  if (restored) {
+    const state = engine.getState();
+    console.log('[ServiceWorker] Restored automation state, phase:', state.phase);
+
+    // If was running, resume the loop
+    if (state.phase === 'running') {
+      console.log('[ServiceWorker] Resuming automation loop after startup');
+      await engine.resume();
+    }
+  }
 });
 
 // Extension installed or updated
@@ -391,6 +471,15 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Handle alarms
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  // Handle automation loop continuation
+  if (alarm.name === LOOP_ALARM_NAME) {
+    console.log('[Alarm] Automation loop alarm fired');
+    const engine = getAutomationEngine();
+    await engine.continueFromAlarm();
+    return;
+  }
+
+  // Handle keepalive alarm
   if (alarm.name === KEEPALIVE_ALARM_NAME) {
     await handleKeepAlive();
   }
