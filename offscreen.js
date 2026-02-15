@@ -369,23 +369,36 @@ Actions:
 
 /**
  * Agent System Prompt - For when actively analyzing/interacting with a page
+ * Used by AGENT_STEP in the agentic loop after navigation/actions
  */
-const AGENT_SYSTEM_PROMPT = `You are analyzing a web page to help the user. You can see the page elements and optionally a screenshot.
+const AGENT_SYSTEM_PROMPT = `You are a browser automation agent executing a multi-step task. You MUST continue acting until the goal is fully achieved.
 
 ## Page Elements
-Elements are labeled [0], [1], [2], etc. Use these labels for click/type actions.
+Interactive elements are labeled [0], [1], [2], etc. Use these labels for click/type actions.
 
-## How to respond
-- Describe what you see or answer the user's question
-- If you need to interact, add actions at the end:
+## Output Format
+ALWAYS respond with actions in this EXACT format:
+
 \`\`\`actions
 [{ "type": "click", "label": 0 }]
 \`\`\`
 
-- If the task is complete, respond without actions
-- If stuck, explain why and don't add actions
+Available actions:
+- click: { "type": "click", "label": 5 }
+- type: { "type": "type", "label": 3, "value": "search text" }
+- scroll: { "type": "scroll", "direction": "down" }
+- navigate: { "type": "navigate", "url": "https://..." }
+- wait: { "type": "wait", "ms": 1000 }
+- back: { "type": "back" }
 
-Available actions: navigate, click, type, scroll, back, wait`;
+## Rules
+- If the goal is NOT yet achieved, you MUST return actions to continue
+- If the goal IS fully achieved, respond with ONLY text (no actions block)
+- If stuck, return: \`\`\`actions
+[{ "type": "stuck", "reason": "explanation" }]
+\`\`\`
+- Maximum 3 actions per response
+- Keep text brief — focus on actions, not descriptions`;
 
 // Keep old name for backward compatibility
 const SYSTEM_PROMPT_TEXT = AGENT_SYSTEM_PROMPT;
@@ -922,15 +935,13 @@ async function handleAgentStep(message) {
   }
 
   try {
-    // Build the context message
-    let contextText = `Iteration ${iteration}\n\n`;
-    contextText += `Goal: ${goal}\n\n`;
-    contextText += `Current Page:\n`;
-    contextText += `URL: ${url}\n`;
+    // Build the context message — goal-first, action-oriented
+    let contextText = `GOAL: ${goal}\n`;
+    contextText += `Step: ${iteration}\n\n`;
+    contextText += `Current page: ${url}\n`;
     contextText += `Title: ${title}\n\n`;
-    contextText += `Page Elements:\n${dom}\n\n`;
-    contextText += `Based on the current page state${screenshot ? ' and screenshot' : ''}, what actions should I take to achieve the goal?\n`;
-    contextText += `If the goal is achieved, respond with just text (no actions). Otherwise, include actions.`;
+    contextText += `Interactive elements:\n${dom}\n\n`;
+    contextText += `What actions achieve the goal? Use \`\`\`actions format. If goal is fully done, say so without actions.`;
 
     // Build message content - with or without screenshot
     let messageContent;

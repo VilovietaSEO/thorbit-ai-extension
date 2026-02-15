@@ -398,33 +398,76 @@ function formatInteractiveElements(elements) {
 
 /**
  * Parse actions from AI response
- * Looks for ```actions [...] ``` blocks
+ * Tries multiple formats: ```actions, ```json, ```, and raw JSON arrays
  * @param {string} content - AI response content
  * @returns {{ text: string, actions: Array }} Parsed text and actions
  */
 function parseActionsFromResponse(content) {
   if (!content) return { text: '', actions: [] };
 
-  // Look for ```actions [...] ``` block
+  // Strategy 1: ```actions [...] ``` block (preferred format)
   const actionsMatch = content.match(/```actions\s*([\s\S]*?)```/);
-
-  if (!actionsMatch) {
-    return { text: content, actions: [] };
-  }
-
-  // Extract text before the actions block
-  const text = content.replace(/```actions\s*[\s\S]*?```/, '').trim();
-
-  // Parse the JSON actions
-  try {
-    const actions = JSON.parse(actionsMatch[1].trim());
-    if (Array.isArray(actions)) {
-      return { text, actions };
+  if (actionsMatch) {
+    const text = content.replace(/```actions\s*[\s\S]*?```/, '').trim();
+    try {
+      const actions = JSON.parse(actionsMatch[1].trim());
+      if (Array.isArray(actions) && actions.length > 0) {
+        return { text, actions };
+      }
+    } catch (e) {
+      console.warn('[Handler] Failed to parse ```actions JSON:', e);
     }
-  } catch (e) {
-    console.warn('[Handler] Failed to parse actions JSON:', e);
   }
 
+  // Strategy 2: ```json [...] ``` block
+  const jsonMatch = content.match(/```json\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1].trim());
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.type) {
+        const text = content.replace(/```json\s*[\s\S]*?```/, '').trim();
+        return { text, actions: parsed };
+      }
+    } catch (e) { /* not an actions JSON block, continue */ }
+  }
+
+  // Strategy 3: Generic ``` [...] ``` code block containing a JSON array
+  const codeBlockMatch = content.match(/```\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    try {
+      const parsed = JSON.parse(codeBlockMatch[1].trim());
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.type) {
+        const text = content.replace(/```\s*[\s\S]*?```/, '').trim();
+        return { text, actions: parsed };
+      }
+    } catch (e) { /* not a JSON code block, continue */ }
+  }
+
+  // Strategy 4: Raw JSON array (entire response or at end of response)
+  // Try the whole content first
+  const trimmed = content.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.type) {
+        return { text: '', actions: parsed };
+      }
+    } catch (e) { /* not a raw JSON response */ }
+  }
+
+  // Try extracting a JSON array from the end of the response
+  const trailingArrayMatch = content.match(/(\[[\s\S]*\])\s*$/);
+  if (trailingArrayMatch) {
+    try {
+      const parsed = JSON.parse(trailingArrayMatch[1]);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.type) {
+        const text = content.slice(0, content.lastIndexOf(trailingArrayMatch[1])).trim();
+        return { text, actions: parsed };
+      }
+    } catch (e) { /* not a trailing JSON array */ }
+  }
+
+  // No actions found in any format
   return { text: content, actions: [] };
 }
 
@@ -632,7 +675,13 @@ async function handleUserMessage(userMessage, tabId, history = []) {
 
   // Execute any actions the AI requested and continue agentic loop if needed
   if (actions && actions.length > 0) {
-    await executeActionsWithAgenticLoop(actions, tabId, userMessage, history);
+    try {
+      await executeActionsWithAgenticLoop(actions, tabId, userMessage, history);
+    } catch (e) {
+      console.error('[Agent] Agentic loop threw:', e);
+      broadcastToSidepanel({ type: 'STREAM_CHUNK', text: `\n(Error: ${e.message})` });
+      broadcastToSidepanel({ type: 'STREAM_DONE' });
+    }
   } else {
     broadcastToSidepanel({ type: 'STREAM_DONE' });
   }
@@ -665,6 +714,9 @@ async function executeActionsWithAgenticLoop(actions, tabId, originalGoal, histo
       return;
     }
 
+    // Ensure content script is loaded on the (possibly new) page
+    await ensureContentScriptLoaded(tabId);
+
     // Extract DOM to see new page state
     let domResult;
     try {
@@ -676,6 +728,7 @@ async function executeActionsWithAgenticLoop(actions, tabId, originalGoal, histo
     }
 
     if (!domResult.success) {
+      console.log('[Agent] DOM extraction failed:', domResult.error);
       broadcastToSidepanel({ type: 'STREAM_DONE' });
       return;
     }
@@ -804,6 +857,9 @@ async function runObservationLoop(goal, tabId, maxIterations = 5) {
 
     // Show brief status
     broadcastToSidepanel({ type: 'STATUS', status: 'Reading page...' });
+
+    // Ensure content script is loaded
+    await ensureContentScriptLoaded(tabId);
 
     // Extract DOM
     let domResult;
