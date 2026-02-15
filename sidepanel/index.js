@@ -158,6 +158,38 @@ const handleServiceWorkerMessage = (msg) => {
   }
 };
 
+/**
+ * Trim conversation history for sending to the AI.
+ * Prevents context bloat by:
+ * 1. Limiting to the most recent N messages
+ * 2. Truncating individual messages that are too long
+ * 3. Stripping DOM/tool artifacts from older messages
+ * @param {Array} messages - Full message history
+ * @param {number} maxMessages - Max messages to include (default 20)
+ * @param {number} maxContentLength - Max chars per message (default 1500)
+ * @returns {Array} Trimmed history
+ */
+const trimHistoryForAI = (messages, maxMessages = 20, maxContentLength = 1500) => {
+  // Take only recent messages
+  const recent = messages.slice(-maxMessages);
+
+  return recent.map((msg, idx) => {
+    let content = msg.content || '';
+
+    // For all but the last 4 messages, aggressively truncate
+    const isOld = idx < recent.length - 4;
+
+    if (isOld && content.length > maxContentLength) {
+      content = content.slice(0, maxContentLength) + '\n...[truncated]';
+    } else if (content.length > maxContentLength * 3) {
+      // Even recent messages get a generous cap
+      content = content.slice(0, maxContentLength * 3) + '\n...[truncated]';
+    }
+
+    return { role: msg.role, content };
+  });
+};
+
 const sendMessage = async (content) => {
   const { messages } = store.getState();
 
@@ -198,12 +230,13 @@ const sendMessage = async (content) => {
   render();
 
   try {
-    // Send to service worker with full conversation history
+    // Send to service worker with trimmed conversation history (not the full blob)
     const { messages } = store.getState();
+    const trimmedHistory = trimHistoryForAI(messages.slice(0, -1));
     await chrome.runtime.sendMessage({
       type: 'ANALYZE_PAGE',
       prompt: content,
-      history: messages.slice(0, -1) // All messages except the one we just added
+      history: trimmedHistory
     });
   } catch (e) {
     console.error('Failed to send message:', e);

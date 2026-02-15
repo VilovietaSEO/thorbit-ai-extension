@@ -822,26 +822,33 @@ async function handleChatMessage(message) {
   }
 
   try {
-    // Build simple context
+    // Build simple context — only URL + title, NOT full DOM/content
     let contextNote = '';
     if (pageContext?.url && pageContext.url !== 'unknown') {
       contextNote = `\n\n[Current tab: ${pageContext.title || pageContext.url}]`;
     }
 
-    // Convert history to Anthropic format and add current message
+    // Convert history to Anthropic format with defensive trimming
+    // This prevents context bloat even if the sidepanel sends too much
+    const MAX_HISTORY_MESSAGES = 20;
+    const MAX_MSG_CHARS = 2000;
     const messages = [];
 
-    // Add history messages (already in format with role and content)
-    for (const msg of history) {
+    // Only take the most recent messages
+    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
+
+    for (const msg of recentHistory) {
       if (msg.role === 'user' || msg.role === 'assistant') {
-        messages.push({
-          role: msg.role,
-          content: msg.content
-        });
+        let content = msg.content || '';
+        // Truncate oversized messages to prevent token explosion
+        if (content.length > MAX_MSG_CHARS) {
+          content = content.slice(0, MAX_MSG_CHARS) + '\n...[truncated]';
+        }
+        messages.push({ role: msg.role, content });
       }
     }
 
-    // Add current user message
+    // Add current user message (untruncated — it's the user's actual request)
     messages.push({
       role: 'user',
       content: userMessage + contextNote

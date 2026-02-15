@@ -555,14 +555,24 @@ async function handleUserMessage(userMessage, tabId, history = []) {
     // Ignore - we'll work without page context
   }
 
-  // Send to AI with conversation history
+  // Trim history before sending to offscreen — prevents context bloat
+  // Only send last 20 messages, truncate long ones
+  const trimmedHistory = history.slice(-20).map(msg => {
+    if (!msg || !msg.content) return msg;
+    const content = msg.content.length > 2000
+      ? msg.content.slice(0, 2000) + '\n...[truncated]'
+      : msg.content;
+    return { role: msg.role, content };
+  });
+
+  // Send to AI with trimmed conversation history
   let aiResult;
   try {
     aiResult = await sendToOffscreen({
       action: 'CHAT_MESSAGE',
       message: userMessage,
       pageContext: pageContext,
-      history: history
+      history: trimmedHistory
     });
   } catch (e) {
     console.error('[Agent] Failed to send to offscreen:', e);
